@@ -63,26 +63,26 @@ fi
 dc=(docker compose --project-name betbot --env-file deploy.env -f compose.yaml -f compose.mihomo.yaml)
 case "$action" in
   setup)
-    "${dc[@]} config --quiet
-    "${dc[@]} build betbot
+    "${dc[@]}" config --quiet
+    "${dc[@]}" build betbot
     # One-off permission repair, scoped strictly to the mounted bot data directory.
-    "${dc[@]} run --rm --no-deps --user 0:0 --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --entrypoint sh betbot -c 'chown -R 10001:10001 /app/data && chmod -R u+rwX /app/data'
-    "${dc[@]} run --rm --no-deps betbot preflight
+    "${dc[@]}" run --rm --no-deps --user 0:0 --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --entrypoint sh betbot -c 'chown -R 10001:10001 /app/data && chmod -R u+rwX /app/data'
+    "${dc[@]}" run --rm --no-deps betbot preflight
     echo 'Проверка пройдена. Остановите локальный betbot run, затем: bash deploy.sh start'
     ;;
-  check) "${dc[@]} run --rm --no-deps betbot preflight ;;
+  check) "${dc[@]}" run --rm --no-deps betbot preflight ;;
   inspect)
     mihomo_name=${2:-$(sed -n 's/^MIHOMO_CONTAINER=//p' deploy.env)}
     if [[ ! "$mihomo_name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
       echo 'Укажите имя: bash deploy.sh inspect ИМЯ_MIHOMO [ПУТЬ_К_CONFIG]' >&2
       exit 1
     fi
-    docker exec "$mihomo_name" sh -c 'if [ -n "$1" ]; then cat -- "$1"; exit; fi; for f in /root/.config/mihomo/config.yaml /root/.config/clash/config.yaml /etc/mihomo/config.yaml /config/config.yaml; do if [ -f "$f" ]; then cat "$f"; exit; fi; done; echo "Не найден config.yaml. Укажите путь третьим аргументом." >&2; exit 1' sh "${3:-}" | "${dc[@]} run --rm -T --no-deps --entrypoint python betbot -m betbot.deployment
+    docker exec "$mihomo_name" sh -c 'if [ -n "$1" ]; then cat -- "$1"; exit; fi; for f in /root/.config/mihomo/config.yaml /root/.config/clash/config.yaml /etc/mihomo/config.yaml /config/config.yaml; do if [ -f "$f" ]; then cat "$f"; exit; fi; done; echo "Не найден config.yaml. Укажите путь третьим аргументом." >&2; exit 1' sh "${3:-}" | "${dc[@]}" run --rm -T --no-deps --entrypoint python betbot -m betbot.deployment
     ;;
-  start) "${dc[@]} up -d --no-deps betbot; "${dc[@]} ps ;;
-  stop) "${dc[@]} stop betbot ;;
-  restart) "${dc[@]} up -d --no-deps --force-recreate betbot ;;
-  logs) "${dc[@]} logs --tail=80 -f betbot ;;
-  status) "${dc[@]} ps ;;
+  start) "${dc[@]}" up -d --no-deps betbot; "${dc[@]}" ps ;;
+  stop) "${dc[@]}" stop betbot ;;
+  restart) "${dc[@]}" up -d --no-deps --force-recreate betbot ;;
+  logs) "${dc[@]}" logs --tail=80 -f betbot ;;
+  status) "${dc[@]}" ps ;;
   *) echo 'Команды: setup [МИХОМО] [ПОРТ], inspect [МИХОМО] [КОНФИГ], check, start, stop, restart, logs, status' >&2; exit 1 ;;
 esac
