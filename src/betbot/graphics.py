@@ -118,7 +118,7 @@ def forecast_image(p, heroes=None, assets=None, demo=False):
     map_label = f"карта {p.draft.map_number}" if p.draft.map_number else f"ID {p.draft.match_id}"
     detail = (p.league_name + " · " if p.league_name else "") + map_label
     c.header(
-        "прогноз после драфта · Dota 2",
+        "разбор с задержкой · Dota 2" if p.late_analysis else "прогноз после драфта · Dota 2",
         p.draft.observed_at.astimezone(MOSCOW).strftime("%d.%m · %H:%M МСК"),
         detail,
     )
@@ -133,7 +133,14 @@ def forecast_image(p, heroes=None, assets=None, demo=False):
         c.text(82, y + 17, "01 / СВЕТ" if side == "radiant" else "02 / ТЬМА", 13, color, True)
         c.text(82, y + 44, name, 29, bold=True, width=405)
         if p.favorite == side:
-            c.text(82, y + 87, "ФАВОРИТ ОСНОВНОЙ МОДЕЛИ", 11, color, True)
+            c.text(
+                82,
+                y + 87,
+                "ФАВОРИТ ОСНОВНОЙ МОДЕЛИ" if p.signal else "СЛАБЫЙ СИГНАЛ / РОВНАЯ КАРТА",
+                11,
+                color,
+                True,
+            )
         for i, player in enumerate(players[:5]):
             hx = 529 + i * 137
             path = assets / f"{player.hero_id}.png" if assets else None
@@ -210,5 +217,7 @@ def forecast_image(p, heroes=None, assets=None, demo=False):
         if demo
         else "Звёзды — сила сигнала · частота — прошлый временной тест, все про-лиги · цены до расходов"
     )
+    if p.late_analysis and not demo:
+        footer = f"С задержкой / в ходе карты · DotaTV {p.draft.delay_seconds // 60} мин · только пики и составы · отдельный учёт"
     c.text(56, 806, footer, 12, GOLD if demo else MUTED, width=1168)
     return c.png()

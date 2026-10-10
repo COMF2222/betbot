@@ -30,7 +30,7 @@ def activity_snapshot(live, recent, now=None) -> dict:
             entry["last_match_at"] = max(entry.get("last_match_at", ""), moment.isoformat())
     for draft in live:
         moment = draft.source_updated_at
-        if moment and 0 <= (now - moment).total_seconds() <= 180:
+        if draft.active and moment and 0 <= (now - moment).total_seconds() <= 180:
             result.setdefault(str(draft.league_id), {})["live_updated_at"] = moment.isoformat()
     return result
 

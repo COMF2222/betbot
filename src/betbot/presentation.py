@@ -23,6 +23,16 @@ def caption(p: Prediction, max_age: int = 30) -> str:
         f"Только драфт: {p.draft_probability:.0%} / {1 - p.draft_probability:.0%}",
         f"Безубыточный кэф по модели: {1 / p.favorite_probability:.2f} до расходов",
     ]
+    if not p.signal:
+        result.insert(1, "⚖️ <b>Нет выраженного фаворита · слабый сигнал.</b>")
+    if p.late_analysis:
+        result.insert(
+            1,
+            "⏱ <b>Поздний разбор: карта идёт или источник задержан.</b> Отдельный учёт.",
+        )
+        result.append(
+            f"Часы источника: {max(0, d.game_time) // 60}:{max(0, d.game_time) % 60:02d} · DotaTV: {d.delay_seconds // 60} мин задержки. Модель получает только пики и составы."
+        )
     quotes = [
         q
         for q in p.quotes
@@ -30,7 +40,7 @@ def caption(p: Prediction, max_age: int = 30) -> str:
     ]
     if quotes:
         result.append("\nКотировки на фаворита:")
-        for q in sorted(quotes, key=lambda q: q.odds, reverse=True)[:5]:
+        for q in sorted(quotes, key=lambda q: q.odds, reverse=True)[:3]:
             suffix = " · эквивалент до расходов" if q.gross else ""
             result.append(f"{esc(q.source, 25)}: <b>{q.odds:.2f}</b>{suffix}")
     else:
@@ -112,6 +122,10 @@ def result_text(p: Prediction, result: dict) -> str:
         f"{'✅ Зашло' if win else '❌ Мимо'}: <b>{esc(winner, 60)}</b> выиграли {label}.",
         f"Прогноз был: {esc(p.favorite_name, 60)} {p.favorite_probability:.0%}.",
     ]
+    if p.late_analysis:
+        lines.append(
+            "⏱ Это результат разбора с задержкой; он учитывается отдельно от прогнозов сразу после драфта."
+        )
     if result.get("duration"):
         seconds = int(result["duration"])
         lines.append(f"Длительность: {seconds // 60}:{seconds % 60:02d}.")
@@ -142,13 +156,18 @@ def result_text(p: Prediction, result: dict) -> str:
 def stats_text(summary: dict, label: str = "За последние 7 дней") -> str:
     s = summary
     rate = f"{s['wins'] / s['settled']:.1%}" if s["settled"] else "пока нет результатов"
-    return (
+    text = (
         f"📊 <b>{esc(label, 100)}</b>\n"
         f"Опубликовано: {s['published']}\n✅ {s['wins']} · ❌ {s['losses']}\n"
         f"Подтверждено: {s['settled']} · ожидают результата: {s['pending']}\n"
         f"Доля верных прогнозов: {rate}\nПропуски / неполные данные: {s['skipped']}\n"
         "Финансовый результат не измеряется по проценту угаданных карт."
     )
+    late = s.get("late", {})
+    if late.get("published"):
+        rate = f"{late['wins'] / late['settled']:.1%}" if late["settled"] else "ожидают результата"
+        text += f"\n\n⏱ <b>Отдельно: разборы с задержкой</b>\nОпубликовано: {late['published']} · верно {late['wins']} из {late['settled']} · {rate}."
+    return text
 
 
 def font(size: int, bold: bool = False):

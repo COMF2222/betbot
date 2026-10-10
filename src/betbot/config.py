@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     max_draft_age_seconds: int = 180
     max_game_time_seconds: int = 90
     min_favorite_probability: float = 0.55
+    publish_all_maps: bool = True
+    allow_delayed_analysis: bool = True
     quote_max_age_seconds: int = 30
     opendota_api_key: str = ""
     steam_api_key: str = ""

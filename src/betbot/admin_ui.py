@@ -162,6 +162,10 @@ def tournament(service, identity, view="current", page=0):
         start, end = event["start_date"].split("-"), event["end_date"].split("-")
         text += f"\n📅 {start[2]}.{start[1]}–{end[2]}.{end[1]}.{end[0]}"
     text += "\n\nПосле драфта бот подготовит прогноз. Автопубликация настраивается отдельно."
+    live = service.store.get("live_coverage", {}).get("matches", [])
+    for match in [m for m in live if m["league_id"] == identity][:5]:
+        state = "разбор подготовлен" if match["forecast"] else match["reason"] or match["status"]
+        text += f"\n\n🧩 {esc(match['teams'], 95)}\n{esc(state, 130)} · {esc(match['source'], 30)}"
     if event.get("source"):
         text += f'\n<a href="{esc(event["source"], 250)}">Расписание организатора</a>'
     return panel(
@@ -181,7 +185,7 @@ def tournament(service, identity, view="current", page=0):
 
 def publications(service, notice=""):
     mode = "Включена" if service.automatic else "Выключена"
-    text = f"🔔 <b>Публикации</b>\n\nАвтопубликация: <b>{mode}</b>\nПауза: {'да' if service.paused else 'нет'}\nПорог фаворита: <b>{service.min_probability:.0%}</b>\nТоталы времени: {'включены' if service.store.get('duration_enabled', False) else 'выключены'}\n\nБез автопубликации новые карточки доступны в личном чате для предварительного просмотра."
+    text = f"🔔 <b>Публикации</b>\n\nАвтопубликация: <b>{mode}</b>\nПауза: {'да' if service.paused else 'нет'}\nКарты: <b>{'все, включая ровные' if service.publish_all_maps else 'только выраженный фаворит'}</b>\nПорог выделения фаворита: <b>{service.min_probability:.0%}</b>\nРазборы с задержкой: {'включены, отдельный учёт' if service.allow_delayed_analysis else 'выключены'}\nТоталы времени: {'включены' if service.store.get('duration_enabled', False) else 'выключены'}\n\nБез автопубликации новые карточки доступны в личном чате для предварительного просмотра."
     if notice:
         text += f"\n\n<blockquote>{esc(notice, 250)}</blockquote>"
     return panel(
@@ -197,6 +201,20 @@ def publications(service, notice=""):
                 )
             ],
             [button("▶ Продолжить" if service.paused else "⏸ Пауза", "ui:toggle:pause")],
+            [
+                button(
+                    "Все карты ✓" if service.publish_all_maps else "Только сигналы ✓",
+                    "ui:toggle:all-maps",
+                )
+            ],
+            [
+                button(
+                    "Разборы с задержкой ✓"
+                    if service.allow_delayed_analysis
+                    else "Разборы с задержкой: выкл.",
+                    "ui:toggle:delayed",
+                )
+            ],
             [button("🎯 Порог сигнала", "ui:threshold"), button("⏱ Тоталы времени", "ui:duration")],
             [button("📅 Время отчётов", "ui:report-hours")],
         ],
@@ -205,7 +223,7 @@ def publications(service, notice=""):
 
 
 def threshold(service):
-    text = f"🎯 <b>Порог сигнала</b>\n\nСейчас: <b>{service.min_probability:.0%}</b>.\nБот публикует карту, когда вероятность фаворита достигает порога. Более высокий порог уменьшает число прогнозов."
+    text = f"🎯 <b>Порог сигнала</b>\n\nСейчас: <b>{service.min_probability:.0%}</b>.\nВ режиме «все карты» бот публикует каждый полный драфт, а оценки ниже порога помечает как ровную карту. В режиме «только сигналы» публикуются карты от этого порога."
     values = (50, 55, 60, 65, 70, 75)
     buttons = [
         [
@@ -320,6 +338,15 @@ def destination(service, chat_id, notice=""):
 
 def status(service):
     text = "🛠 <b>Состояние бота</b>\n\n"
+    coverage = service.store.get("live_coverage", {})
+    if coverage:
+        matches = coverage.get("matches", [])
+        text += f"Выбранные live-карты: <b>{len(matches)}</b> · с разбором: <b>{sum(m['forecast'] for m in matches)}</b>\n\n"
+        for match in matches[:5]:
+            state = (
+                "разбор подготовлен" if match["forecast"] else match["reason"] or match["status"]
+            )
+            text += f"{esc(match['teams'], 80)}\n{esc(state, 120)}\n\n"
     rows = service.store.health_rows()
     text += (
         "\n".join(
@@ -360,6 +387,7 @@ def statistics(service, period="today"):
                 button("7 дней", "ui:stats:week", "primary" if period == "week" else None),
             ],
             [button("🖼 Карточка отчёта", f"ui:report-card:{period}")],
+            [button("⏱ Отчёт разборов с задержкой", f"ui:report-card:{period}:delayed")],
             [button("📄 Тест Tier 1", "ui:history"), button("💾 История CSV", "ui:export")],
         ],
         "ui:home",

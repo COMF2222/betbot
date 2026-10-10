@@ -50,10 +50,12 @@ def market_pair(quotes):
     return None
 
 
-def entries_from_rows(rows):
+def entries_from_rows(rows, late_analysis=False):
     result = []
     for row in rows:
         p = Prediction.from_dict(json.loads(row["payload"]))
+        if p.late_analysis != late_analysis:
+            continue
         actual = json.loads(row["result"]) if row["result"] else {}
         won = actual.get("radiant_win")
         settled = isinstance(won, bool)
@@ -125,13 +127,14 @@ def totals(entries):
     }
 
 
-def report_payload(store, since, until, label="Итоги дня", destination=None):
-    entries = entries_from_rows(store.published_between(since, until, destination))
+def report_payload(store, since, until, label="Итоги дня", destination=None, late_analysis=False):
+    entries = entries_from_rows(store.published_between(since, until, destination), late_analysis)
     cumulative = totals(
         entries_from_rows(
             store.published_between(
                 "1970-01-01T00:00:00+00:00", min(until, utcnow().isoformat()), destination
-            )
+            ),
+            late_analysis,
         )
     )
     comeback = None
@@ -184,6 +187,7 @@ def report_payload(store, since, until, label="Итоги дня", destination=N
         "cumulative": cumulative,
         "comeback": comeback,
         "demo": False,
+        "late_analysis": late_analysis,
         **totals(entries),
     }
 
@@ -192,6 +196,10 @@ def report_caption(data):
     total = data["settled"]
     title = f"{'✅' if data['accuracy'] is not None and data['accuracy'] >= 0.5 else '📊'} <b>{data['wins']} из {total} · {esc(data['label'].lower(), 35)}</b>"
     lines = [title]
+    if data.get("late_analysis"):
+        lines.append(
+            "⏱ Разборы с задержкой / в ходе карты. Статистика отдельно от прогнозов сразу после драфта."
+        )
     misses = [e for e in data["entries"] if e["correct"] is False]
     if misses:
         lines.append(
@@ -252,7 +260,14 @@ def render_report(data):
         weekdays[moment.weekday()],
     )
     d.rounded_rectangle((56, 148, 410, 316), radius=18, fill=PANEL)
-    c.text(80, 164, "ВЕРНЫХ ПРОГНОЗОВ", 13, MUTED, True)
+    c.text(
+        80,
+        164,
+        "ВЕРНЫХ ПОЗДНИХ РАЗБОРОВ" if data.get("late_analysis") else "ВЕРНЫХ ПРОГНОЗОВ",
+        13,
+        MUTED,
+        True,
+    )
     c.text(76, 178, str(data["wins"]), 83, CYAN, True)
     digits = c.draw.textlength(str(data["wins"]), font=font(83, True))
     c.text(91 + digits, 212, f"/ {data['settled']}", 42, MUTED, True, width=210)

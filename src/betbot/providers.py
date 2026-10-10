@@ -131,7 +131,140 @@ def parse_live(raw: dict, observed_at=None) -> Draft:
         map_number=map_number,
         patch=raw.get("patch"),
         delay_seconds=int(raw.get("delay") or 0),
+        clock_is_delayed=False,
+        clock_known=isinstance(raw.get("game_time"), (int, float)),
+        active=not bool(raw.get("deactivate_time")),
     )
+
+
+def parse_steam_live(raw: dict, observed_at=None) -> Draft:
+    """Only identities and heroes enter the draft; scoreboard performance is excluded."""
+    now = observed_at or utcnow()
+    scoreboard = raw.get("scoreboard") or {}
+    names = {int(p.get("account_id") or 0): p.get("name") or "" for p in raw.get("players", [])}
+
+    def players(side, team):
+        members = [p for p in raw.get("players", []) if p.get("team") == team]
+        # Slot is an identifier, never a lane inferred from current-game performance.
+        slots = {
+            p.get("account_id"): p.get("player_slot", 999)
+            for p in (scoreboard.get(side) or {}).get("players", [])
+        }
+        return tuple(
+            Player(
+                int(p.get("account_id") or 0),
+                int(p.get("hero_id") or 0),
+                str(names.get(int(p.get("account_id") or 0), "")),
+            )
+            for p in sorted(
+                members,
+                key=lambda p: (slots.get(p.get("account_id"), 999), int(p.get("account_id") or 0)),
+            )
+        )
+
+    rteam, dteam = raw.get("radiant_team") or {}, raw.get("dire_team") or {}
+    wins = [raw.get("radiant_series_wins"), raw.get("dire_series_wins")]
+    return Draft(
+        match_id=str(raw.get("match_id") or ""),
+        league_id=int(raw.get("league_id") or 0),
+        radiant_id=int(rteam.get("team_id") or 0),
+        dire_id=int(dteam.get("team_id") or 0),
+        radiant_name=str(rteam.get("team_name") or ""),
+        dire_name=str(dteam.get("team_name") or ""),
+        radiant=players("radiant", 0),
+        dire=players("dire", 1),
+        observed_at=now,
+        # This endpoint exposes no snapshot timestamp. This records the direct read,
+        # not a claim that delayed scoreboard telemetry is real-time.
+        source_updated_at=now,
+        game_time=int(scoreboard.get("duration") or 0),
+        map_number=sum(wins) + 1 if all(isinstance(w, int) and w >= 0 for w in wins) else None,
+        delay_seconds=int(raw.get("stream_delay_s") or 0),
+        source_name="Steam",
+        clock_is_delayed=True,
+        clock_known=isinstance(scoreboard.get("duration"), (int, float))
+        and isinstance(raw.get("stream_delay_s"), (int, float)),
+    )
+
+
+class Steam:
+    base = "https://api.steampowered.com/IDOTA2Match_570"
+
+    def __init__(self, http: HTTP, key: str):
+        self.http, self.key = http, key
+
+    async def live(self) -> list[Draft]:
+        league, top = await asyncio.gather(
+            self.http.get(self.base + "/GetLiveLeagueGames/v1/", {"key": self.key}),
+            self.http.get(self.base + "/GetTopLiveGame/v1/", {"key": self.key, "partner": 1}),
+            return_exceptions=True,
+        )
+        games = (league.get("result") or {}).get("games") if isinstance(league, dict) else None
+        top_games = top.get("game_list") if isinstance(top, dict) else None
+        if not isinstance(games, list) and not isinstance(top_games, list):
+            raise ProviderError("Steam не вернул список турнирных карт")
+        now = utcnow()
+        drafts = []
+        for game in games or []:
+            try:
+                draft = parse_steam_live(game, now)
+                if draft.match_id.isdigit() and draft.league_id > 0:
+                    drafts.append(draft)
+            except (TypeError, ValueError, KeyError):
+                continue
+        top_drafts = []
+        for game in top_games or []:
+            try:
+                if int(game.get("league_id") or 0) > 0 and game.get("match_id"):
+                    top_drafts.append(replace(parse_live(game, now), source_name="Steam Top"))
+            except (TypeError, ValueError, KeyError):
+                continue
+        return merge_live_drafts(top_drafts, drafts)
+
+    async def match(self, match_id: str) -> dict:
+        if not match_id.isdigit():
+            raise ProviderError("Некорректный match ID")
+        raw = await self.http.get(
+            self.base + "/GetMatchDetails/v1/", {"key": self.key, "match_id": match_id}
+        )
+        return raw.get("result", {})
+
+
+def merge_live_drafts(opendota: list[Draft], steam: list[Draft], max_age=180) -> list[Draft]:
+    """Steam adds coverage; matching fresh TopLiveGames supplies the undelayed clock."""
+    combined = {d.match_id: d for d in opendota}
+    for draft in steam:
+        other = combined.get(draft.match_id)
+        if other and other.source_updated_at:
+            age = (draft.observed_at - other.source_updated_at).total_seconds()
+            same_teams = (draft.league_id, draft.radiant_id, draft.dire_id) == (
+                other.league_id,
+                other.radiant_id,
+                other.dire_id,
+            )
+            same_players = all(
+                {(p.account_id, p.hero_id) for p in getattr(draft, side)}
+                == {(p.account_id, p.hero_id) for p in getattr(other, side)}
+                for side in ("radiant", "dire")
+            )
+            if same_teams and same_players and 0 <= age <= max_age and other.active:
+                draft = replace(
+                    draft,
+                    series_id=other.series_id,
+                    patch=other.patch,
+                    game_time=other.game_time,
+                    source_updated_at=other.source_updated_at,
+                    clock_is_delayed=other.clock_is_delayed,
+                    clock_known=other.clock_known,
+                    source_name="Steam + " + other.source_name,
+                )
+            elif 0 <= age <= max_age and other.complete and draft.complete:
+                # Conflicting identities must not silently attach a market or a forecast.
+                combined[draft.match_id] = replace(draft, active=False)
+                continue
+        if draft.complete or not other or not other.complete:
+            combined[draft.match_id] = draft
+    return list(combined.values())
 
 
 class OpenDota:
@@ -468,15 +601,28 @@ class OddsPapi:
 
 
 def eligible_draft(draft: Draft, max_age: int, max_game_time: int) -> str | None:
+    reason = eligible_analysis(draft, max_age)
+    if reason:
+        return reason
+    if not draft.clock_known:
+        return "время карты неизвестно: нельзя подтвердить прогноз сразу после драфта"
+    age = max(0, (utcnow() - draft.source_updated_at).total_seconds())
+    delay = draft.delay_seconds if draft.clock_is_delayed else 0
+    if draft.game_time + delay + age > max_game_time:
+        return "карта уже идёт: снимок опоздал для прогноза после драфта"
+    return None
+
+
+def eligible_analysis(draft: Draft, max_age: int) -> str | None:
     if not draft.complete:
         return "неполный драфт или состав команд"
+    if not draft.active:
+        return "карта завершена или источники расходятся по составу"
     if not draft.source_updated_at:
         return "нет времени обновления live-источника"
     age = (utcnow() - draft.source_updated_at).total_seconds()
     if age < -5 or age > max_age:
         return "запоздалый снимок live-источника"
-    if draft.delay_seconds < 0 or draft.delay_seconds > max_age:
-        return "слишком большая задержка live-источника"
-    if draft.game_time + draft.delay_seconds + max(0, age) > max_game_time:
-        return "карта уже идёт: снимок опоздал для прогноза после драфта"
+    if draft.delay_seconds < 0:
+        return "некорректная задержка live-источника"
     return None

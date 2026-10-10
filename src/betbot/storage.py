@@ -440,22 +440,32 @@ class Store:
                 (since, until),
             )
         ]
-        wins = settled = 0
-        for row in rows:
-            result = json.loads(row["result"]) if row["result"] else None
-            if result and isinstance(result.get("radiant_win"), bool):
-                settled += 1
-                p = json.loads(row["payload"])["radiant_probability"]
-                wins += (p >= 0.5) == result["radiant_win"]
+
+        def count(late):
+            published = wins = settled = 0
+            for row in rows:
+                payload = json.loads(row["payload"])
+                if payload.get("late_analysis", False) != late:
+                    continue
+                published += 1
+                result = json.loads(row["result"]) if row["result"] else None
+                if result and isinstance(result.get("radiant_win"), bool):
+                    settled += 1
+                    wins += (payload["radiant_probability"] >= 0.5) == result["radiant_win"]
+            return {
+                "published": published,
+                "settled": settled,
+                "wins": wins,
+                "losses": settled - wins,
+                "pending": published - settled,
+            }
+
         skips = self.db.execute(
             "SELECT COUNT(*) FROM matches WHERE reason!='' AND seen_at>=? AND seen_at<?",
             (since, until),
         ).fetchone()[0]
         return {
-            "published": len(rows),
-            "settled": settled,
-            "wins": wins,
-            "losses": settled - wins,
-            "pending": len(rows) - settled,
+            **count(False),
+            "late": count(True),
             "skipped": skips,
         }

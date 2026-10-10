@@ -45,6 +45,10 @@ class Draft:
     map_number: int | None = None
     patch: int | None = None
     delay_seconds: int = 0
+    source_name: str = "OpenDota"
+    clock_is_delayed: bool = True
+    clock_known: bool = True
+    active: bool = True
 
     @property
     def complete(self) -> bool:
@@ -145,6 +149,8 @@ class Prediction:
     history_as_of: str = ""
     reliability: dict = field(default_factory=dict)
     league_name: str = ""
+    late_analysis: bool = False
+    signal: bool = True
 
     @property
     def favorite(self) -> str:
@@ -176,6 +182,8 @@ class Prediction:
             "history_as_of": self.history_as_of,
             "reliability": self.reliability,
             "league_name": self.league_name,
+            "late_analysis": self.late_analysis,
+            "signal": self.signal,
         }
 
     @classmethod

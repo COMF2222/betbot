@@ -109,7 +109,7 @@ HELP = """🤖 <b>Betbot · админка</b>
 /status — источники и пропуски
 /model — проверка модели
 /history — исторический отчёт Tier 1 и CSV
-/threshold 0.55 — минимальная вероятность для публикации
+/threshold 0.55 — порог выраженного сигнала; в режиме «все карты» ровные тоже публикуются
 /stats — итоги за 7 дней
 /export — история CSV
 /demo — условный пример карточки
@@ -372,13 +372,13 @@ def build_router(service: Service) -> Router:
                 raise ValueError
         except ValueError:
             await message.answer(
-                f"Текущий порог: {service.min_probability:.0%}. Формат: /threshold 0.55 (0.50–0.95). Выше порог — меньше публикуемых карт."
+                f"Текущий порог: {service.min_probability:.0%}. Формат: /threshold 0.55 (0.50–0.95). Фильтрует публикации в режиме «только сигналы»."
             )
             return
         service.store.set("min_favorite_probability", value)
         service.store.audit("threshold", f"{message.from_user.id}:{value}")
         await message.answer(
-            f"Новые прогнозы публикуются при вероятности фаворита от {value:.0%}. Уже сохранённые прогнозы остаются в истории."
+            f"Порог сигнала: {value:.0%}. В режиме «все карты» оценки ниже порога помечаются как ровные."
         )
 
     @router.message(Command("position"))
@@ -774,12 +774,20 @@ def build_router(service: Service) -> Router:
             screen = ui.publications(service)
         elif action == "toggle":
             kind = args[2]
-            key = {"auto": "auto_publish", "pause": "paused", "duration": "duration_enabled"}.get(
-                kind
-            )
+            key = {
+                "auto": "auto_publish",
+                "pause": "paused",
+                "duration": "duration_enabled",
+                "all-maps": "publish_all_maps",
+                "delayed": "allow_delayed_analysis",
+            }.get(kind)
             if not key:
                 return
-            current = service.automatic if kind == "auto" else service.store.get(key, False)
+            current = {
+                "auto": service.automatic,
+                "all-maps": service.publish_all_maps,
+                "delayed": service.allow_delayed_analysis,
+            }.get(kind, service.store.get(key, False))
             notice = ""
             if (
                 kind == "auto"
@@ -968,7 +976,10 @@ def build_router(service: Service) -> Router:
             from .reports import period_bounds, render_report, report_caption, report_payload
 
             start_at, end_at, label = period_bounds(args[2])
-            data = report_payload(service.store, start_at, end_at, label)
+            late = len(args) > 3 and args[3] == "delayed"
+            data = report_payload(service.store, start_at, end_at, label, late_analysis=late)
+            if late:
+                data["label"] += " · разборы с задержкой"
             await callback.message.answer_photo(
                 BufferedInputFile(render_report(data), filename="report.png"),
                 caption=report_caption(data),

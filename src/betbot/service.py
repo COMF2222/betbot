@@ -29,11 +29,13 @@ from .providers import (
     OddsPapi,
     OpenDota,
     Polymarket,
+    Steam,
+    eligible_analysis,
     eligible_draft,
     match_context,
+    merge_live_drafts,
     normalized,
     patch_for_time,
-    steam_map_numbers,
 )
 from .storage import Store
 
@@ -56,6 +58,9 @@ class Service:
         self.http = HTTP(settings.proxy_url or None)
         self.odota = OpenDota(self.http, settings.opendota_api_key)
         self.poly = Polymarket(self.http)
+        self.steam = Steam(self.http, settings.steam_api_key) if settings.steam_api_key else None
+        self.live_cache = None
+        self.live_lock = asyncio.Lock()
         self.feed = (
             OddsFeed(self.http, settings.odds_feed_url, settings.odds_feed_api_key)
             if settings.odds_feed_url
@@ -111,6 +116,51 @@ class Service:
     def min_probability(self):
         return self.store.get("min_favorite_probability", self.settings.min_favorite_probability)
 
+    @property
+    def publish_all_maps(self):
+        return self.store.get("publish_all_maps", self.settings.publish_all_maps)
+
+    @property
+    def allow_delayed_analysis(self):
+        return self.store.get("allow_delayed_analysis", self.settings.allow_delayed_analysis)
+
+    def publication_issue(self, draft, late=False):
+        if late and self.allow_delayed_analysis:
+            return eligible_analysis(draft, self.settings.max_draft_age_seconds)
+        return eligible_draft(
+            draft, self.settings.max_draft_age_seconds, self.settings.max_game_time_seconds
+        )
+
+    async def live_drafts(self, force=False):
+        async with self.live_lock:
+            if (
+                not force
+                and self.live_cache
+                and (utcnow() - self.live_cache[0]).total_seconds() < 15
+            ):
+                return self.live_cache[1]
+            calls = [self.odota.live()]
+            if self.steam:
+                calls.append(self.steam.live())
+            results = await asyncio.gather(*calls, return_exceptions=True)
+            available = []
+            for name, result in zip(("OpenDota live", "Steam live"), results, strict=False):
+                if isinstance(result, Exception):
+                    self.store.health(name, False, type(result).__name__)
+                    available.append([])
+                else:
+                    self.store.health(name, True, f"В источнике {len(result)} турнирных карт")
+                    available.append(result)
+            if all(isinstance(result, Exception) for result in results):
+                raise RuntimeError("Все источники текущих драфтов недоступны")
+            drafts = merge_live_drafts(
+                available[0],
+                available[1] if len(available) > 1 else [],
+                self.settings.max_draft_age_seconds,
+            )
+            self.live_cache = (utcnow(), drafts)
+            return drafts
+
     async def close(self):
         self.stop.set()
         await self.http.close()
@@ -156,7 +206,7 @@ class Service:
             return
         async with self.activity_lock:
             results = await asyncio.gather(
-                asyncio.wait_for(self.odota.live(), 8),
+                asyncio.wait_for(self.live_drafts(force=force), 8),
                 asyncio.wait_for(self.odota.pro_matches(), 8),
                 return_exceptions=True,
             )
@@ -347,9 +397,12 @@ class Service:
             radiant=profiles(draft.radiant),
             dire=profiles(draft.dire),
         )
-        reason = eligible_draft(
-            draft, self.settings.max_draft_age_seconds, self.settings.max_game_time_seconds
+        late = bool(
+            eligible_draft(
+                draft, self.settings.max_draft_age_seconds, self.settings.max_game_time_seconds
+            )
         )
+        reason = self.publication_issue(draft, late)
         self.store.observe(draft, "skipped" if reason else "observed", reason or "")
         if (
             reason
@@ -357,6 +410,26 @@ class Service:
             or self.store.match(draft.match_id)["result"]
         ):
             return None
+        if late and self.steam:
+            try:
+                result = await self.steam.match(draft.match_id)
+            except Exception:
+                result = {}
+            if str(result.get("match_id")) == draft.match_id and isinstance(
+                result.get("radiant_win"), bool
+            ):
+                self.store.result(
+                    draft.match_id,
+                    {
+                        "radiant_win": result["radiant_win"],
+                        "duration": result.get("duration"),
+                        "start_time": result.get("start_time"),
+                        "confirmed_at": utcnow().isoformat(),
+                        "source": "Steam",
+                    },
+                )
+                self.store.mark(draft.match_id, "finished", "карта уже завершена")
+                return None
         self.model.reload()
         if not self.model.ready:
             self.store.mark(draft.match_id, "waiting_model", "модель ещё не обучена")
@@ -367,7 +440,9 @@ class Service:
         except ValueError as exc:
             self.store.mark(draft.match_id, "skipped", str(exc))
             return None
-        if p.favorite_probability < self.min_probability:
+        p.late_analysis = late
+        p.signal = p.favorite_probability >= self.min_probability
+        if not p.signal and not self.publish_all_maps:
             self.store.mark(draft.match_id, "skipped", "нет достаточно выраженного фаворита")
             return None
         p.quotes = await self.collect_quotes(draft)
@@ -445,9 +520,7 @@ class Service:
             return "Турнир выключен."
         if not self.model.publication_ready or not p.publication_ready:
             return "Модель пока не прошла минимальный порог проверки. Доступен предварительный просмотр; отчёт — /model."
-        reason = eligible_draft(
-            p.draft, self.settings.max_draft_age_seconds, self.settings.max_game_time_seconds
-        )
+        reason = self.publication_issue(p.draft, p.late_analysis)
         if (
             reason
             or (utcnow() - p.draft.observed_at).total_seconds()
@@ -458,9 +531,7 @@ class Service:
         await self.hero_assets(p.draft)
         image = render_card(p, self.heroes, self.assets)
         if (
-            eligible_draft(
-                p.draft, self.settings.max_draft_age_seconds, self.settings.max_game_time_seconds
-            )
+            self.publication_issue(p.draft, p.late_analysis)
             or (utcnow() - p.draft.observed_at).total_seconds()
             > self.settings.max_draft_age_seconds
         ):
@@ -473,11 +544,7 @@ class Service:
             if self.paused or chat_id not in {t["chat_id"] for t in self.destinations}:
                 continue
             if (
-                eligible_draft(
-                    p.draft,
-                    self.settings.max_draft_age_seconds,
-                    self.settings.max_game_time_seconds,
-                )
+                self.publication_issue(p.draft, p.late_analysis)
                 or (utcnow() - p.draft.observed_at).total_seconds()
                 > self.settings.max_draft_age_seconds
             ):
@@ -602,7 +669,10 @@ class Service:
         if not unresolved:
             return
         try:
-            recent = await self.odota.pro_matches()
+            try:
+                recent = await self.odota.pro_matches()
+            except Exception:
+                recent = []
             for row in recent:
                 match_id = str(row.get("match_id"))
                 if match_id in unresolved and isinstance(row.get("radiant_win"), bool):
@@ -630,7 +700,17 @@ class Service:
                     unresolved.discard(match_id)
             if self.tick_count % 6 == 0:
                 for match_id in sorted(unresolved)[:8]:
-                    row = await self.odota.match(match_id)
+                    source = "OpenDota"
+                    try:
+                        row = await self.odota.match(match_id)
+                    except Exception:
+                        row = {}
+                    if not isinstance(row.get("radiant_win"), bool) and self.steam:
+                        try:
+                            row = await self.steam.match(match_id)
+                            source = "Steam"
+                        except Exception:
+                            row = {}
                     if str(row.get("match_id")) == match_id and isinstance(
                         row.get("radiant_win"), bool
                     ):
@@ -642,7 +722,7 @@ class Service:
                                 "start_time": row.get("start_time"),
                                 "context": match_context(row),
                                 "confirmed_at": utcnow().isoformat(),
-                                "source": "OpenDota",
+                                "source": source,
                             },
                         )
             self.store.health("Результаты", True, "Проверены завершённые карты")
@@ -671,8 +751,9 @@ class Service:
         for target in self.destinations:
             if not self.paused and target["chat_id"] in {t["chat_id"] for t in self.destinations}:
                 await self.reports_for(target)
+                await self.reports_for(target, late_analysis=True)
 
-    async def reports_for(self, target):
+    async def reports_for(self, target, late_analysis=False):
         now = utcnow().astimezone(MOSCOW)
         from .reports import render_report, report_caption, report_payload
 
@@ -685,7 +766,11 @@ class Service:
             start = datetime.combine(day, time.min, MOSCOW).astimezone(utcnow().tzinfo)
             end = start + timedelta(days=1)
             summary = report_payload(
-                self.store, start.isoformat(), end.isoformat(), destination=target["chat_id"]
+                self.store,
+                start.isoformat(),
+                end.isoformat(),
+                destination=target["chat_id"],
+                late_analysis=late_analysis,
             )
             if not summary["published"]:
                 continue
@@ -694,16 +779,27 @@ class Service:
             summary["label"] = (
                 "Предварительные итоги дня" if phase == "preliminary" else "Итоги дня"
             )
+            if late_analysis:
+                period += ":delayed"
+                summary["label"] += " · разборы с задержкой"
             await self.send_report(period, report_caption(summary), render_report(summary), target)
         if now.weekday() == 0 and now.hour >= self.store.get("weekly_report_hour", 12):
             end = datetime.combine(now.date(), time.min, MOSCOW).astimezone(utcnow().tzinfo)
             start = end - timedelta(days=7)
             summary = report_payload(
-                self.store, start.isoformat(), end.isoformat(), "Итоги недели", target["chat_id"]
+                self.store,
+                start.isoformat(),
+                end.isoformat(),
+                "Итоги недели",
+                target["chat_id"],
+                late_analysis,
             )
             if summary["published"]:
+                if late_analysis:
+                    summary["label"] += " · разборы с задержкой"
                 await self.send_report(
-                    f"week:{start.date()}:{'preliminary' if summary['pending'] else 'final'}",
+                    f"week:{start.date()}:{'preliminary' if summary['pending'] else 'final'}"
+                    + (":delayed" if late_analysis else ""),
                     report_caption(summary),
                     render_report(summary),
                     target,
@@ -743,23 +839,38 @@ class Service:
             await self.refresh_league_activity()
             if self.store.leagues(enabled_only=True):
                 try:
-                    drafts = await self.odota.live()
-                    maps = {}
-                    if self.settings.steam_api_key:
-                        try:
-                            maps = await steam_map_numbers(self.http, self.settings.steam_api_key)
-                            self.store.health("Steam", True, f"Номера карт: {len(maps)}")
-                        except Exception as exc:
-                            self.store.health("Steam", False, str(exc))
+                    drafts = await self.live_drafts()
+                    coverage = []
                     for draft in drafts:
-                        if draft.match_id in maps:
-                            draft = replace(draft, map_number=maps[draft.match_id])
-                        await self.process_draft(draft)
+                        if not self.store.enabled(draft.league_id):
+                            continue
+                        try:
+                            await self.process_draft(draft)
+                        except Exception as exc:
+                            self.store.observe(draft, "error", type(exc).__name__)
+                            log.warning("Draft %s failed: %s", draft.match_id, type(exc).__name__)
+                        row = self.store.match(draft.match_id)
+                        coverage.append(
+                            {
+                                "match_id": draft.match_id,
+                                "league_id": draft.league_id,
+                                "teams": f"{draft.radiant_name} — {draft.dire_name}",
+                                "source": draft.source_name,
+                                "status": row["status"],
+                                "reason": row["reason"],
+                                "forecast": self.store.has_forecast(draft.match_id),
+                            }
+                        )
+                    self.store.set(
+                        "live_coverage", {"checked_at": utcnow().isoformat(), "matches": coverage}
+                    )
                     self.store.health(
-                        "OpenDota live", True, f"В источнике {len(drafts)} турнирных карт"
+                        "Разборы",
+                        True,
+                        f"Выбранные карты: {len(coverage)}; с анализом: {sum(r['forecast'] for r in coverage)}",
                     )
                 except Exception as exc:
-                    self.store.health("OpenDota live", False, str(exc))
+                    self.store.health("Разборы", False, type(exc).__name__)
             await self.publish_explanations()
             await self.collect_results()
             if self.automatic and not self.paused:

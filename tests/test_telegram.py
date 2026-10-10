@@ -21,6 +21,7 @@ from aiogram.types import CallbackQuery, Chat, ChatShared, Message, Update, User
 
 from betbot.config import Settings
 from betbot.domain import utcnow
+from betbot.presentation import MOSCOW
 from betbot.service import Service
 from betbot.storage import Store
 from betbot.telegram import ADMIN_COMMANDS, AdminGuard, build_router, register_commands
@@ -78,7 +79,7 @@ async def routed_bot(tmp_path):
     store = Store(tmp_path / "state.sqlite3")
     store.league(123, "BLAST Slam Test")
     service = Service(settings, store)
-    day = utcnow().date().isoformat()
+    day = utcnow().astimezone(MOSCOW).date().isoformat()
     service.calendar = [
         {"league_id": 123, "name": "BLAST Slam Test", "start_date": day, "end_date": day}
     ]

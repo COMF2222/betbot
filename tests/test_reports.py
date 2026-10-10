@@ -151,3 +151,20 @@ def test_channel_report_counts_only_posts_delivered_to_that_channel(tmp_path, pr
     assert data["cumulative"]["settled"] == 1
     assert store.summary()["published"] == 2
     store.close()
+
+
+def test_delayed_analysis_has_separate_daily_and_cumulative_counts(tmp_path, prediction):
+    store = Store(tmp_path / "db.sqlite3")
+    published(store, prediction, {"radiant_win": True})
+    late = replace(prediction, draft=replace(prediction.draft, match_id="late"), late_analysis=True)
+    published(store, late, {"radiant_win": False})
+    now = utcnow()
+    args = (store, (now - timedelta(days=1)).isoformat(), (now + timedelta(days=1)).isoformat())
+    early = report_payload(*args)
+    delayed = report_payload(*args, late_analysis=True)
+    assert early["published"] == early["wins"] == early["cumulative"]["wins"] == 1
+    assert delayed["published"] == delayed["losses"] == delayed["cumulative"]["losses"] == 1
+    assert "Статистика отдельно" in report_caption(delayed)
+    with Image.open(io.BytesIO(render_report(delayed))) as image:
+        assert image.size == (1280, 720)
+    store.close()
