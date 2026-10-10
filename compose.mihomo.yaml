@@ -1,0 +1,9 @@
+# Reuse the networking namespace of an existing Mihomo container (or host mode).
+services:
+  betbot:
+    network_mode: ${MIHOMO_NETWORK_MODE:?Run deploy.sh to select the existing Mihomo}
+    environment:
+      PROXY_URL: ${VPN_PROXY_URL:?Set the proxy URL in deploy.env}
+      TELEGRAM_PROXY_URL: ${VPN_PROXY_URL:?Set the proxy URL in deploy.env}
+      PROXY_REQUIRED: "true"
+      PROXY_WAIT_SECONDS: "180"

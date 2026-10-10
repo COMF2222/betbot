@@ -1,0 +1,16 @@
+{
+  "tier": 1,
+  "classification": "Liquipedia Tier 1, verified 2026-10-10",
+  "source": "https://liquipedia.net/dota2/Tier_1_Tournaments",
+  "events": [
+    {"league_id": 19785, "name": "Esports World Cup 2026", "start_date": "2026-07-07", "end_date": "2026-07-19", "source": "https://liquipedia.net/dota2/Tier_1_Tournaments"},
+    {"league_id": 20009, "name": "1win Essence II", "start_date": "2026-07-30", "end_date": "2026-08-05", "source": "https://liquipedia.net/dota2/Tier_1_Tournaments"},
+    {"league_id": 19719, "name": "The International 2026", "start_date": "2026-08-13", "end_date": "2026-08-23", "source": "https://liquipedia.net/dota2/The_International/2026"},
+    {"league_id": 19102, "name": "BLAST SLAM VIII", "start_date": "2026-09-29", "end_date": "2026-10-11", "source": "https://liquipedia.net/dota2/BLAST/Slam/8"}
+  ],
+  "excluded": [
+    {"league_id": 20279, "name": "PGL Wallachia Season 9", "reason": "Liquipedia identifies this edition as Tier 2", "source": "https://liquipedia.net/dota2/PGL/Wallachia/9"},
+    {"league_id": 19917, "name": "Games of the Future 2026", "reason": "Liquipedia Tier 2", "source": "https://liquipedia.net/dota2/Recent_Tournament_Results"}
+  ],
+  "notes": ["Main events only: regional and open qualifiers are separate leagues and excluded", "Event dates are checked in addition to league IDs to protect against IDs reused between seasons", "BLAST SLAM VIII is still in progress at the end of the evaluation window", "OpenDota premium is not used as a synonym for Liquipedia Tier 1"]
+}

@@ -1,0 +1,14 @@
+.env
+.secrets
+deploy.env
+.env.*
+!.env.example
+.venv
+.git
+data
+artifacts
+.pytest_cache
+.ruff_cache
+__pycache__
+**/__pycache__
+tests

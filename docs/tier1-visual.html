@@ -1,0 +1,75 @@
+<div id="betbot-tier1-history">
+  <h3>Tier 1: точность и число прогнозов</h3>
+  <div class="text-muted text-small" id="betbot-total-caption"></div>
+  <div class="viz-controls" style="margin-top:16px">
+    <label class="form-label" for="betbot-threshold">Порог вероятности фаворита: <output id="betbot-threshold-value" class="tabular-nums">55%</output>
+      <input id="betbot-threshold" class="form-range" type="range" min="50" max="80" value="55" step="1">
+    </label>
+  </div>
+  <div class="viz-grid" aria-live="polite" style="margin-top:12px">
+    <div class="card viz-stat"><div class="text-muted">Верных исходов</div><div class="viz-stat-value tabular-nums" id="betbot-accuracy">—</div><div class="text-small tabular-nums" id="betbot-hits">—</div></div>
+    <div class="card viz-stat"><div class="text-muted">Прогнозов</div><div class="viz-stat-value tabular-nums" id="betbot-count">—</div><div class="text-small" id="betbot-total-count"></div></div>
+    <div class="card viz-stat"><div class="text-muted">Покрытие карт</div><div class="viz-stat-value tabular-nums" id="betbot-coverage">—</div><div class="text-small">при выбранном пороге</div></div>
+  </div>
+  <div style="margin-top:16px" class="viz-row"><span>Верные / ошибочные прогнозы</span><span class="tabular-nums" id="betbot-split">—</span></div>
+  <div class="progress" id="betbot-hit-bar" role="progressbar" aria-label="Доля верных исходов" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="margin-top:8px"><div class="progress-bar" id="betbot-hit-fill" style="width:0%;background:var(--viz-series-1)"></div></div>
+  <div class="table-responsive" style="margin-top:20px">
+    <table class="table table-sm"><thead><tr><th>Турнир</th><th class="text-end">Карт</th><th class="text-end">Верных</th><th class="text-end">Точность</th></tr></thead><tbody id="betbot-league-rows"></tbody></table>
+  </div>
+  <div class="text-muted text-small">Ретроспективная выборка · порог меняет отбор карт · исход текущей карты скрыт от модели</div>
+  <script type="application/json" id="betbot-tier1-data">[]</script>
+  <script type="application/json" id="betbot-tier1-meta">{}</script>
+  <script>
+  (() => {
+    const root = document.getElementById('betbot-tier1-history');
+    const data = JSON.parse(root.querySelector('#betbot-tier1-data').textContent);
+    const meta = JSON.parse(root.querySelector('#betbot-tier1-meta').textContent);
+    const slider = root.querySelector('#betbot-threshold');
+    const names = meta.names;
+    const pct = x => (x * 100).toFixed(1).replace('.', ',') + '%';
+    const totalHits = data.filter(row => row[1]).length;
+    root.querySelector('#betbot-total-caption').textContent = meta.period + ' · ' + Object.keys(names).length + ' турнира · все карты: ' + totalHits + ' / ' + data.length + ', ' + pct(totalHits / data.length);
+    root.querySelector('#betbot-total-count').textContent = 'из ' + data.length + ' карт';
+    function draw() {
+      const cutoff = Number(slider.value) / 100;
+      const selected = data.filter(row => row[0] >= cutoff);
+      const correct = selected.filter(row => row[1]).length;
+      const accuracy = selected.length ? correct / selected.length : 0;
+      root.querySelector('#betbot-threshold-value').textContent = slider.value + '%';
+      root.querySelector('#betbot-accuracy').textContent = selected.length ? pct(accuracy) : '—';
+      root.querySelector('#betbot-count').textContent = selected.length;
+      root.querySelector('#betbot-hits').textContent = correct + ' / ' + selected.length;
+      root.querySelector('#betbot-coverage').textContent = pct(selected.length / data.length);
+      root.querySelector('#betbot-split').textContent = correct + ' / ' + (selected.length - correct);
+      root.querySelector('#betbot-hit-fill').style.width = accuracy * 100 + '%';
+      root.querySelector('#betbot-hit-bar').setAttribute('aria-valuenow', String(accuracy * 100));
+      const body = root.querySelector('#betbot-league-rows');
+      body.replaceChildren();
+      for (const [id, name] of Object.entries(names)) {
+        const games = selected.filter(row => row[2] === Number(id));
+        const hits = games.filter(row => row[1]).length;
+        const tr = document.createElement('tr');
+        [name, games.length, hits, games.length ? pct(hits / games.length) : '—'].forEach((value, index) => {
+          const td = document.createElement('td');
+          td.textContent = value;
+          if (index) td.className = 'text-end';
+          tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      }
+      return {cutoff, accuracy, count:selected.length, coverage:selected.length / data.length};
+    }
+    function restore(state) {
+      const value = state?.modelContent?.thresholdPercent;
+      if (Number.isInteger(value) && value >= 50 && value <= 80) slider.value = value;
+      draw();
+    }
+    slider.addEventListener('input', () => {
+      const result = draw();
+      window.openai?.setWidgetState({modelContent:{thresholdPercent:Number(slider.value),accuracy:result.accuracy,count:result.count,coverage:result.coverage},privateContent:null}).catch(() => {});
+    });
+    window.addEventListener('openai:set_globals', event => restore(event.detail?.globals?.widgetState));
+    restore(window.openai?.widgetState);
+  })();
+  </script>
+</div>
