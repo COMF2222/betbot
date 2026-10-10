@@ -38,6 +38,8 @@ class Canvas:
         right=False,
         fit=False,
         baseline=False,
+        center=False,
+        middle=False,
     ):
         face = font(size, bold)
         value = str(value)
@@ -49,21 +51,35 @@ class Canvas:
             while value and self.draw.textlength(value + "…", font=face) > width:
                 value = value[:-1]
             value += "…"
-        if right:
-            x -= self.draw.textlength(value, font=face)
-        if baseline:
+        bounds = self.draw.textbbox((0, 0), value, font=face)
+        if center or middle:
+            mask, offset = face.getmask2(value, mode="L")
+            ink = mask.getbbox()
+            if ink:
+                bounds = tuple(ink[i] + offset[i % 2] for i in range(4))
+        # Bbox ends are exclusive; center the occupied pixels and snap to the raster.
+        if center:
+            x -= (bounds[0] + bounds[2] - 1) / 2
+        elif right:
+            x -= bounds[2]
+        else:
+            x -= bounds[0]
+        if middle:
+            y -= (bounds[1] + bounds[3] - 1) / 2
+        elif baseline:
             y -= face.getmetrics()[0]
+        x, y = round(x), round(y)
         self.draw.text((x, y), value, font=face, fill=color)
         return self.draw.textbbox((x, y), value, font=face)
 
     def header(self, subtitle, date, detail=""):
         d = self.draw
         d.rounded_rectangle((56, 35, 107, 86), radius=13, fill=CYAN)
-        self.text(70, 35, "B", 34, "#102333", True)
-        self.text(125, 31, "BETBOT", 29, bold=True)
-        self.text(125, 72, subtitle, 17, MUTED)
-        self.text(1224, 37, date, 20, bold=True, right=True, width=480)
-        self.text(1224, 73, detail, 17, MUTED, right=True, width=510)
+        self.text(81.5, 60.5, "B", 34, "#102333", True, center=True, middle=True)
+        self.text(125, 45, "BETBOT", 29, bold=True, middle=True)
+        self.text(125, 78, subtitle, 17, MUTED, width=575, middle=True)
+        self.text(1224, 45, date, 20, bold=True, right=True, width=480, middle=True)
+        self.text(1224, 78, detail, 17, MUTED, right=True, width=510, middle=True)
         d.line((56, 119, 1224, 119), fill="#2b364b", width=1)
 
     def stars(self, x, y, count, size=17):
@@ -149,16 +165,25 @@ def forecast_image(p, heroes=None, assets=None, demo=False):
             (56, y, 1224, y + 120), radius=16, fill=PANEL, outline="#2b3950", width=1
         )
         d.rounded_rectangle((56, y + 18, 61, y + 101), radius=2, fill=color)
-        c.text(82, y + 17, "01 / СВЕТ" if side == "radiant" else "02 / ТЬМА", 13, color, True)
-        c.text(82, y + 44, name, 29, bold=True, width=405)
+        c.text(
+            82,
+            y + 26,
+            "01 / СВЕТ" if side == "radiant" else "02 / ТЬМА",
+            13,
+            color,
+            True,
+            middle=True,
+        )
+        c.text(82, y + 60, name, 29, bold=True, width=405, middle=True)
         if p.favorite == side:
             c.text(
                 82,
-                y + 87,
+                y + 95,
                 "ФАВОРИТ ОСНОВНОЙ МОДЕЛИ" if p.signal else "СЛАБЫЙ СИГНАЛ / РОВНАЯ КАРТА",
                 11,
                 color,
                 True,
+                middle=True,
             )
         for i, player in enumerate(players[:5]):
             hx = 529 + i * 137
@@ -176,10 +201,29 @@ def forecast_image(p, heroes=None, assets=None, demo=False):
                 c.image.paste(portrait, (hx, y + 13), mask)
             else:
                 d.rounded_rectangle((hx, y + 13, hx + 124, y + 83), radius=7, fill="#2b3a4d")
-                c.text(hx + 30, y + 32, f"#{player.hero_id}", 23, color, True)
-            c.text(hx, y + 86, player.name or str(player.account_id), 13, width=124)
+                c.text(
+                    hx + 62,
+                    y + 48,
+                    f"#{player.hero_id}",
+                    23,
+                    color,
+                    True,
+                    width=110,
+                    fit=True,
+                    center=True,
+                    middle=True,
+                )
+            c.text(
+                hx + 62,
+                y + 94,
+                player.name or str(player.account_id),
+                13,
+                width=124,
+                center=True,
+                middle=True,
+            )
             hero = heroes.get(player.hero_id, {}).get("localized_name", f"Hero #{player.hero_id}")
-            c.text(hx, y + 103, hero, 10, MUTED, width=124)
+            c.text(hx + 62, y + 109, hero, 10, MUTED, width=124, center=True, middle=True)
     for title, probability, x, width, name in (
         ("ИГРОКИ + ДРАФТ / ОСНОВНАЯ ОЦЕНКА", p.radiant_probability, 56, 702, "combined"),
         ("ТОЛЬКО ДРАФТ / СРАВНЕНИЕ", p.draft_probability, 780, 444, "draft"),
@@ -189,23 +233,49 @@ def forecast_image(p, heroes=None, assets=None, demo=False):
         level, _ = strength(confidence)
         favorite = p.draft.radiant_name if probability >= 0.5 else p.draft.dire_name
         color = CYAN if probability >= 0.5 else AMBER
-        c.text(x + 24, 449, title, 13, MUTED, True)
+        c.text(x + 24, 458, title, 13, MUTED, True, middle=True)
         if name == "combined":
-            number = c.text(x + 22, 466, f"{confidence:.0%}", 86, color, True, width=230, fit=True)
+            number = c.text(
+                x + 24,
+                514,
+                f"{confidence:.0%}",
+                86,
+                color,
+                True,
+                width=230,
+                fit=True,
+                middle=True,
+            )
             name_x = number[2] + 24
             name_width = x + width - 24 - name_x
-            c.text(name_x, 490, favorite, 29, bold=True, width=name_width)
+            c.text(name_x, 507, favorite, 29, bold=True, width=name_width, middle=True)
             c.stars(name_x, 539, level, 19)
-            c.text(name_x, 573, reliability_label(p, name, confidence), 13, MUTED, width=name_width)
+            c.text(
+                name_x,
+                582,
+                reliability_label(p, name, confidence),
+                13,
+                MUTED,
+                width=name_width,
+                middle=True,
+            )
         else:
-            c.text(x + 22, 470, f"{confidence:.0%}", 68, color, True)
-            c.text(x + 24, 550, favorite, 24, bold=True, width=width - 48)
+            c.text(x + 24, 508, f"{confidence:.0%}", 68, color, True, middle=True)
+            c.text(x + 24, 565, favorite, 24, bold=True, width=width - 48, middle=True)
             c.stars(x + 24, 588, level, 15)
             label = reliability_label(p, name, confidence).split(" · ", 1)[-1]
-            c.text(x + 152, 586, label, 12, MUTED, width=width - 176)
+            c.text(x + 152, 595.5, label, 12, MUTED, width=width - 176, middle=True)
         c.bar(625, probability, x + 24, width - 48)
-        c.text(x + 24, 646, f"Свет {probability:.0%}", 13, CYAN)
-        c.text(x + width - 24, 646, f"Тьма {1 - probability:.0%}", 13, AMBER, right=True)
+        c.text(x + 24, 655, f"Свет {probability:.0%}", 13, CYAN, middle=True)
+        c.text(
+            x + width - 24,
+            655,
+            f"Тьма {1 - probability:.0%}",
+            13,
+            AMBER,
+            right=True,
+            middle=True,
+        )
     d.rounded_rectangle((56, 697, 1224, 780), radius=16, fill="#1b293f")
     groups = {}
     for q in p.quotes:
@@ -220,18 +290,34 @@ def forecast_image(p, heroes=None, assets=None, demo=False):
     source = "Polymarket" if "Polymarket" in groups else next(iter(groups), None)
     if source:
         quotes = groups[source]
-        c.text(80, 710, source.upper() + " / ЦЕНЫ В МОМЕНТ ПРОГНОЗА", 12, MUTED, True, width=900)
+        c.text(
+            80,
+            719,
+            source.upper() + " / ЦЕНЫ В МОМЕНТ ПРОГНОЗА",
+            12,
+            MUTED,
+            True,
+            width=900,
+            middle=True,
+        )
         for outcome, team, x, color in (
             ("radiant", p.draft.radiant_name, 80, CYAN),
             ("dire", p.draft.dire_name, 677, AMBER),
         ):
             q = quotes.get(outcome)
             c.text(
-                x, 738, f"{team}  {q.odds:.2f}" if q else f"{team}  —", 23, color, True, width=518
+                x,
+                753,
+                f"{team}  {q.odds:.2f}" if q else f"{team}  —",
+                23,
+                color,
+                True,
+                width=518,
+                middle=True,
             )
     else:
-        c.text(80, 710, "КОТИРОВКИ", 12, MUTED, True)
-        c.text(80, 738, "Подтверждённых цен на эту карту пока нет", 22, MUTED)
+        c.text(80, 719, "КОТИРОВКИ", 12, MUTED, True, middle=True)
+        c.text(80, 753, "Подтверждённых цен на эту карту пока нет", 22, MUTED, middle=True)
     footer = (
         "ДЕМОНСТРАЦИЯ · все команды и числа условные"
         if demo

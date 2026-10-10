@@ -54,6 +54,22 @@ def test_market_probabilities_do_not_mix_different_rules(prediction):
     assert market_pair([a, b]) is None
 
 
+def test_report_uses_verified_public_names_without_rewriting_forecasts(tmp_path, prediction):
+    store = Store(tmp_path / "db.sqlite3")
+    published(store, prediction, {"radiant_win": True})
+    before = store.forecasts()[0]["payload"]
+    store.set("team_aliases", {str(prediction.draft.radiant_id): "Skyreavers"})
+    now = utcnow()
+    data = report_payload(
+        store, (now - timedelta(days=1)).isoformat(), (now + timedelta(days=1)).isoformat()
+    )
+    assert data["entries"][0]["favorite"] == "Skyreavers"
+    assert "Skyreavers" in data["entries"][0]["label"]
+    assert store.forecasts()[0]["payload"] == before
+    assert data["settled"] == data["wins"] == 1
+    store.close()
+
+
 def test_comeback_only_uses_paired_prices_observed_during_actual_game(
     tmp_path, prediction, monkeypatch
 ):

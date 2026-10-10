@@ -136,6 +136,31 @@ def test_ambiguous_events_are_not_bound(draft):
     assert Polymarket.find_event(draft, [event, {**event, "id": "other"}]) is None
 
 
+async def test_verified_aliases_match_the_exact_map_without_swapping_sides(draft):
+    raw = replace(draft, radiant_name="Rottweilas", dire_name="The Bot^$")
+    aliases = {str(raw.radiant_id): "Rottweilas Latam", str(raw.dire_id): "Skyreavers"}
+    event = {
+        "teams": [{"name": "Skyreavers"}, {"name": "Rottweilas Latam"}],
+        "startTime": draft.observed_at.isoformat(),
+        "markets": [
+            {
+                "id": "7",
+                "question": "Game 2 Winner",
+                "sportsMarketType": "child_moneyline",
+                "acceptingOrders": True,
+                "outcomes": ["Skyreavers", "Rottweilas Latam"],
+                "clobTokenIds": ["sky", "rott"],
+            }
+        ],
+    }
+    assert Polymarket.find_event(raw, [event]) is None
+    assert Polymarket.find_event(raw, [event], aliases) == event
+    http = FakeHTTP({"asks": [{"price": "0.5", "size": "20"}]})
+    quotes = await Polymarket(http).quotes(raw, event, aliases)
+    assert [q.outcome for q in quotes] == ["dire", "radiant"]
+    assert all(q.map_number == 2 and q.match_id == raw.match_id for q in quotes)
+
+
 async def test_feed_cannot_freshen_stale_cached_records(draft):
     q = quote(match_id=draft.match_id, source_updated_at=utcnow() - timedelta(hours=1))
     http = FakeHTTP({"quotes": [q.to_dict()]})

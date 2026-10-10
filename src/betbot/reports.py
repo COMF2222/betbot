@@ -50,10 +50,11 @@ def market_pair(quotes):
     return None
 
 
-def entries_from_rows(rows, late_analysis=False):
+def entries_from_rows(rows, late_analysis=False, aliases=None):
     result = []
     for row in rows:
         p = Prediction.from_dict(json.loads(row["payload"]))
+        p.draft = p.draft.with_team_aliases(aliases or {})
         if p.late_analysis != late_analysis:
             continue
         actual = json.loads(row["result"]) if row["result"] else {}
@@ -128,13 +129,17 @@ def totals(entries):
 
 
 def report_payload(store, since, until, label="Итоги дня", destination=None, late_analysis=False):
-    entries = entries_from_rows(store.published_between(since, until, destination), late_analysis)
+    aliases = store.get("team_aliases", {})
+    entries = entries_from_rows(
+        store.published_between(since, until, destination), late_analysis, aliases
+    )
     cumulative = totals(
         entries_from_rows(
             store.published_between(
                 "1970-01-01T00:00:00+00:00", min(until, utcnow().isoformat()), destination
             ),
             late_analysis,
+            aliases,
         )
     )
     comeback = None
@@ -288,16 +293,17 @@ def render_report(data):
         (163, "ИГРОКИ + ДРАФТ", data["settled"], data["wins"], CYAN),
         (235, "ТОЛЬКО ДРАФТ", data["draft_count"], data["draft_wins"], AMBER),
     ):
-        c.text(460, y, title, 13, MUTED, True)
-        c.text(1198, y - 2, f"{wins} / {count}", 20, color, True, right=True)
+        c.text(460, y + 10, title, 13, MUTED, True, middle=True)
+        c.text(1198, y + 10, f"{wins} / {count}", 20, color, True, right=True, middle=True)
         c.bar(y + 35, wins / count if count else 0, 460, 738, (color, "#29354b"))
     c.text(56, 330, f"КАРТЫ / ОПУБЛИКОВАНО {data['published']}", 12, MUTED, True)
     c.text(690, 330, "ИГРОКИ + ДРАФТ", 12, CYAN, True)
     c.text(978, 330, "ТОЛЬКО ДРАФТ", 12, AMBER, True)
     for i, entry in enumerate(data["entries"][:5]):
         y = 363 + i * 48
-        c.text(56, y, f"{i + 1:02d}", 13, MUTED)
-        c.text(92, y - 1, entry["label"], 17, bold=True, width=575)
+        row_center = y + 12.5
+        c.text(56, row_center, f"{i + 1:02d}", 13, MUTED, middle=True)
+        c.text(92, row_center, entry["label"], 17, bold=True, width=575, middle=True)
         for x, correct, name, probability in (
             (690, entry["correct"], entry["favorite"], entry["probability"]),
             (
@@ -308,8 +314,8 @@ def render_report(data):
             ),
         ):
             c.result(x, y + 1, correct)
-            c.text(x + 33, y, name, 14, bold=True, width=145)
-            c.text(x + 238, y, f"{probability:.0%}", 15, MUTED, right=True)
+            c.text(x + 33, row_center, name, 14, bold=True, width=145, middle=True)
+            c.text(x + 238, row_center, f"{probability:.0%}", 15, MUTED, right=True, middle=True)
         d.line((56, y + 38, 1224, y + 38), fill="#283449", width=1)
     if not data["entries"]:
         c.text(56, 392, "За этот период опубликованных прогнозов пока нет", 23, MUTED)
@@ -318,36 +324,47 @@ def render_report(data):
         if len(data["entries"]) > 5
         else "Все карты этого периода"
     )
-    c.text(56, 612, more, 14, MUTED)
+    c.text(56, 622, more, 14, MUTED, middle=True)
     if data["pending"]:
         c.text(
             1224,
-            612,
+            622,
             f"Ожидают результата: {data['pending']} · предварительно",
             14,
             GOLD,
             right=True,
+            middle=True,
         )
     elif data.get("demo"):
-        c.text(1224, 612, "ДЕМОНСТРАЦИЯ / ВСЕ ДАННЫЕ УСЛОВНЫЕ", 12, GOLD, right=True)
+        c.text(
+            1224,
+            622,
+            "ДЕМОНСТРАЦИЯ / ВСЕ ДАННЫЕ УСЛОВНЫЕ",
+            12,
+            GOLD,
+            right=True,
+            middle=True,
+        )
     d.rounded_rectangle((56, 649, 1224, 703), radius=12, fill="#1b293f")
     total = data["cumulative"]
     c.text(
         76,
-        666,
+        676,
         f"С начала: игроки + драфт {total['wins']}/{total['settled']} · только драфт {total['draft_wins']}/{total['draft_count']}",
         16,
         bold=True,
         width=795,
+        middle=True,
     )
-    c.stars(904, 670, 3, 14)
+    c.stars(904, 669, 3, 14)
     c.text(
         1200,
-        666,
+        676,
         f"и выше: {total['strong_wins']}/{total['strong_count']}",
         15,
         right=True,
         width=178,
+        middle=True,
     )
     return c.png()
 

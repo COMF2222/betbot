@@ -164,6 +164,22 @@ async def service(tmp_path, prediction):
     store.close()
 
 
+async def test_public_names_do_not_change_saved_prediction_or_player_features(service, prediction):
+    from betbot.model import History
+
+    aliases = {str(prediction.draft.dire_id): "Skyreavers"}
+    service.store.set("team_aliases", aliases)
+    payload = json.dumps(prediction.to_dict())
+    displayed = service.saved_prediction(payload)
+    assert displayed.draft.dire_name == "Skyreavers"
+    assert displayed.radiant_probability == prediction.radiant_probability
+    assert displayed.draft.dire == prediction.draft.dire
+    assert displayed.quotes == prediction.quotes
+    history = History()
+    assert history.features(displayed.draft) == history.features(prediction.draft)
+    assert json.loads(payload)["draft"]["dire_name"] == prediction.draft.dire_name
+
+
 async def test_low_confidence_delayed_analysis_is_published_once_to_both_destinations(
     service, draft
 ):

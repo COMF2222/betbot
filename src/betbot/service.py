@@ -375,6 +375,7 @@ class Service:
     async def process_draft(self, draft: Draft) -> int | None:
         if not self.store.enabled(draft.league_id):
             return None
+        draft = draft.with_team_aliases(self.store.get("team_aliases", {}))
         map_number = self.store.get(f"map:{draft.match_id}", draft.map_number)
 
         def profiles(players):
@@ -474,11 +475,16 @@ class Service:
                 await self.preview(forecast_id)
         return forecast_id
 
+    def saved_prediction(self, payload: str) -> Prediction:
+        p = Prediction.from_dict(json.loads(payload))
+        p.draft = p.draft.with_team_aliases(self.store.get("team_aliases", {}))
+        return p
+
     async def preview(self, forecast_id: int):
         if not self.bot:
             return
         row = self.store.forecast(forecast_id)
-        p = Prediction.from_dict(json.loads(row["payload"]))
+        p = self.saved_prediction(row["payload"])
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -515,7 +521,7 @@ class Service:
             return "Публикации на паузе."
         if row["result"]:
             return "Карта уже завершена. Запоздалый прогноз не публикуется."
-        p = Prediction.from_dict(json.loads(row["payload"]))
+        p = self.saved_prediction(row["payload"])
         if not self.store.enabled(p.draft.league_id):
             return "Турнир выключен."
         if not self.model.publication_ready or not p.publication_ready:
@@ -610,7 +616,7 @@ class Service:
             )
             if not delivery:
                 continue
-            p = Prediction.from_dict(json.loads(row["payload"]))
+            p = self.saved_prediction(row["payload"])
             try:
                 msg = await self.bot.send_message(
                     row["destination"],
@@ -695,7 +701,7 @@ class Service:
         for row in self.store.forecasts("published", limit=100):
             if row["result"]:
                 continue
-            p = Prediction.from_dict(json.loads(row["payload"]))
+            p = self.saved_prediction(row["payload"])
             if (
                 p.draft.map_number
                 and 0 <= (utcnow() - p.draft.observed_at).total_seconds() <= 6 * 3600
@@ -804,6 +810,7 @@ class Service:
                     for draft in drafts:
                         if not self.store.enabled(draft.league_id):
                             continue
+                        draft = draft.with_team_aliases(self.store.get("team_aliases", {}))
                         try:
                             await self.process_draft(draft)
                         except Exception as exc:

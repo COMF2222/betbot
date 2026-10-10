@@ -1,21 +1,23 @@
+import io
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pytest
-from PIL import ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 from betbot.graphics import forecast_image
 from betbot.reports import demo_report, render_report
 
 
-@pytest.fixture
-def text_boxes(monkeypatch):
+@pytest.fixture(params=["default", "server"])
+def text_boxes(monkeypatch, request):
     directories = [
         Path(__file__).resolve().parents[1] / "artifacts/fonts",
         Path("/usr/share/fonts/truetype/dejavu"),
     ]
     directory = next((p for p in directories if (p / "DejaVuSans.ttf").exists()), None)
-    if directory:
+    if directory and request.param == "server":
 
         def server_font(size, bold=False):
             return ImageFont.truetype(
@@ -81,3 +83,32 @@ def test_daily_and_weekly_report_labels_fit_large_counts(text_boxes, wins, settl
         item["draft_favorite"] = "Ещё одна длинная команда"
     render_report(data)
     assert_legible(text_boxes, 720)
+
+
+@pytest.mark.parametrize("layout", ["forecast", "report"])
+def test_logo_glyph_is_centered_in_the_rendered_badge(prediction, text_boxes, layout):
+    png = forecast_image(prediction) if layout == "forecast" else render_report(demo_report())
+    with Image.open(io.BytesIO(png)) as image:
+        badge = np.asarray(image.crop((56, 35, 108, 87)).convert("RGB"))
+    rows, columns = np.nonzero(np.all(badge == (16, 35, 51), axis=2))
+    assert len(rows) > 0
+    assert abs(int(columns.min()) - (51 - int(columns.max()))) <= 1
+    assert abs(int(rows.min()) - (51 - int(rows.max()))) <= 1
+
+
+def test_hero_labels_share_the_center_of_their_portraits(prediction, text_boxes):
+    forecast_image(prediction)
+    for i, player in enumerate(prediction.draft.radiant):
+        center = 529 + i * 137 + 62
+        labels = [box for text, box in text_boxes if text == player.name]
+        assert labels
+        for box in labels:
+            assert (box[0] + box[2]) / 2 == pytest.approx(center, abs=1)
+
+
+def test_report_labels_align_with_result_icons(text_boxes):
+    render_report(demo_report())
+    rows = [box for _, box in text_boxes if 361 <= box[1] and box[3] <= 582]
+    for box in rows:
+        center = (box[1] + box[3]) / 2
+        assert any(abs(center - (375.5 + i * 48)) <= 1 for i in range(5))

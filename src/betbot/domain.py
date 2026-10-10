@@ -1,5 +1,5 @@
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -49,6 +49,15 @@ class Draft:
     clock_is_delayed: bool = True
     clock_known: bool = True
     active: bool = True
+
+    def with_team_aliases(self, aliases: dict) -> "Draft":
+        """Use verified public names without changing team IDs or the actual roster."""
+        names = {}
+        for side in ("radiant", "dire"):
+            alias = aliases.get(str(getattr(self, f"{side}_id")))
+            if isinstance(alias, str) and alias.strip():
+                names[f"{side}_name"] = alias.strip()
+        return replace(self, **names) if names else self
 
     @property
     def complete(self) -> bool:

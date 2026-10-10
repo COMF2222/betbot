@@ -32,7 +32,7 @@ from . import admin_ui as ui
 from .config import Settings
 from .demo import demo_prediction
 from .destinations import BindingError, validate_destination
-from .domain import Prediction, utcnow
+from .domain import utcnow
 from .network import route_label, telegram_bot, telegram_proxy
 from .presentation import caption, esc, explanation, render_card
 from .providers import BOOKMAKERS, normalized
@@ -604,7 +604,7 @@ def build_router(service: Service) -> Router:
             )
         )
         for row in service.store.forecasts(limit=100000):
-            p = Prediction.from_dict(json.loads(row["payload"]))
+            p = service.saved_prediction(row["payload"])
             result = json.loads(row["result"]) if row["result"] else {}
             name = p.favorite_name
             if name.startswith(("=", "+", "-", "@")):
@@ -702,7 +702,7 @@ def build_router(service: Service) -> Router:
         present = {r["id"] for r in rows}
         for identity in service.store.pending_publications():
             row = service.store.forecast(identity)
-            p = Prediction.from_dict(json.loads(row["payload"]))
+            p = service.saved_prediction(row["payload"])
             if (
                 identity not in present
                 and row["state"] != "superseded"
@@ -724,7 +724,7 @@ def build_router(service: Service) -> Router:
                 ]
             ]
         for row in rows:
-            p = Prediction.from_dict(json.loads(row["payload"]))
+            p = service.saved_prediction(row["payload"])
             name = f"{p.favorite_name} {p.favorite_probability:.0%} · карта {p.draft.map_number or '?'}"
             buttons.append([ui.button(name[:55], f"ui:forecast:{row['id']}")])
         return ui.panel(text, buttons, "ui:home")
@@ -952,7 +952,7 @@ def build_router(service: Service) -> Router:
             if not row:
                 screen = ui.panel("Прогноз не найден.", [], "ui:pending")
             else:
-                p = Prediction.from_dict(json.loads(row["payload"]))
+                p = service.saved_prediction(row["payload"])
                 text = (
                     "📬 <b>Предпросмотр</b>\n\n"
                     + caption(p, service.settings.quote_max_age_seconds, service.heroes)
@@ -1000,7 +1000,7 @@ def build_router(service: Service) -> Router:
         row = service.store.forecast(int(callback.data.split(":")[1]))
         if row:
             await callback.message.answer(
-                explanation(Prediction.from_dict(json.loads(row["payload"])), service.heroes)
+                explanation(service.saved_prediction(row["payload"]), service.heroes)
             )
 
     @router.message(F.chat.type == ChatType.PRIVATE, F.text)
