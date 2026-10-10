@@ -164,7 +164,13 @@ def tournament(service, identity, view="current", page=0):
     text += "\n\nПосле драфта бот подготовит прогноз. Автопубликация настраивается отдельно."
     live = service.store.get("live_coverage", {}).get("matches", [])
     for match in [m for m in live if m["league_id"] == identity][:5]:
-        state = "разбор подготовлен" if match["forecast"] else match["reason"] or match["status"]
+        state = (
+            "карта завершена"
+            if match["status"] == "finished"
+            else "разбор подготовлен"
+            if match["forecast"]
+            else match["reason"] or match["status"]
+        )
         text += f"\n\n🧩 {esc(match['teams'], 95)}\n{esc(state, 130)} · {esc(match['source'], 30)}"
     if event.get("source"):
         text += f'\n<a href="{esc(event["source"], 250)}">Расписание организатора</a>'
@@ -344,7 +350,11 @@ def status(service):
         text += f"Выбранные live-карты: <b>{len(matches)}</b> · с разбором: <b>{sum(m['forecast'] for m in matches)}</b>\n\n"
         for match in matches[:5]:
             state = (
-                "разбор подготовлен" if match["forecast"] else match["reason"] or match["status"]
+                "карта завершена"
+                if match["status"] == "finished"
+                else "разбор подготовлен"
+                if match["forecast"]
+                else match["reason"] or match["status"]
             )
             text += f"{esc(match['teams'], 80)}\n{esc(state, 120)}\n\n"
     rows = service.store.health_rows()

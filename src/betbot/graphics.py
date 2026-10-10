@@ -26,16 +26,35 @@ class Canvas:
         self.draw.arc((980, -220, 1510, 310), 80, 265, fill="#29354b", width=1)
         self.draw.arc((940, -260, 1550, 350), 80, 265, fill="#233048", width=1)
 
-    def text(self, x, y, value, size=22, color=WHITE, bold=False, width=None, right=False):
+    def text(
+        self,
+        x,
+        y,
+        value,
+        size=22,
+        color=WHITE,
+        bold=False,
+        width=None,
+        right=False,
+        fit=False,
+        baseline=False,
+    ):
         face = font(size, bold)
         value = str(value)
+        if fit and width:
+            while size > 12 and self.draw.textlength(value, font=face) > width:
+                size -= 1
+                face = font(size, bold)
         if width and self.draw.textlength(value, font=face) > width:
             while value and self.draw.textlength(value + "…", font=face) > width:
                 value = value[:-1]
             value += "…"
         if right:
             x -= self.draw.textlength(value, font=face)
+        if baseline:
+            y -= face.getmetrics()[0]
         self.draw.text((x, y), value, font=face, fill=color)
+        return self.draw.textbbox((x, y), value, font=face)
 
     def header(self, subtitle, date, detail=""):
         d = self.draw
@@ -172,17 +191,18 @@ def forecast_image(p, heroes=None, assets=None, demo=False):
         color = CYAN if probability >= 0.5 else AMBER
         c.text(x + 24, 449, title, 13, MUTED, True)
         if name == "combined":
-            c.text(x + 22, 466, f"{confidence:.0%}", 86, color, True)
-            c.text(x + 244, 490, favorite, 29, bold=True, width=width - 274)
-            c.stars(x + 246, 539, level, 19)
-            c.text(
-                x + 244, 573, reliability_label(p, name, confidence), 13, MUTED, width=width - 268
-            )
+            number = c.text(x + 22, 466, f"{confidence:.0%}", 86, color, True, width=230, fit=True)
+            name_x = number[2] + 24
+            name_width = x + width - 24 - name_x
+            c.text(name_x, 490, favorite, 29, bold=True, width=name_width)
+            c.stars(name_x, 539, level, 19)
+            c.text(name_x, 573, reliability_label(p, name, confidence), 13, MUTED, width=name_width)
         else:
-            c.text(x + 22, 480, f"{confidence:.0%}", 64, color, True)
-            c.text(x + 164, 503, favorite, 23, bold=True, width=width - 186)
-            c.stars(x + 24, 568, level, 15)
-            c.text(x + 24, 595, reliability_label(p, name, confidence), 12, MUTED, width=width - 48)
+            c.text(x + 22, 470, f"{confidence:.0%}", 68, color, True)
+            c.text(x + 24, 550, favorite, 24, bold=True, width=width - 48)
+            c.stars(x + 24, 588, level, 15)
+            label = reliability_label(p, name, confidence).split(" · ", 1)[-1]
+            c.text(x + 152, 586, label, 12, MUTED, width=width - 176)
         c.bar(625, probability, x + 24, width - 48)
         c.text(x + 24, 646, f"Свет {probability:.0%}", 13, CYAN)
         c.text(x + width - 24, 646, f"Тьма {1 - probability:.0%}", 13, AMBER, right=True)

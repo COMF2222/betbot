@@ -6,7 +6,7 @@ from datetime import UTC, datetime, time, timedelta
 
 from .domain import Prediction, Quote, timestamp, utcnow
 from .graphics import AMBER, CYAN, GOLD, MUTED, PANEL, Canvas, strength
-from .presentation import MOSCOW, esc, font
+from .presentation import MOSCOW, esc
 
 
 def period_bounds(period="today", now=None):
@@ -268,9 +268,19 @@ def render_report(data):
         MUTED,
         True,
     )
-    c.text(76, 178, str(data["wins"]), 83, CYAN, True)
-    digits = c.draw.textlength(str(data["wins"]), font=font(83, True))
-    c.text(91 + digits, 212, f"/ {data['settled']}", 42, MUTED, True, width=210)
+    number = c.text(76, 260, str(data["wins"]), 83, CYAN, True, width=170, fit=True, baseline=True)
+    count_x = number[2] + 16
+    c.text(
+        count_x,
+        260,
+        f"/ {data['settled']}",
+        42,
+        MUTED,
+        True,
+        width=386 - count_x,
+        fit=True,
+        baseline=True,
+    )
     rate = f"{data['accuracy']:.0%}" if data["accuracy"] is not None else "—"
     c.text(80, 281, f"{rate} точность · {data['losses']} мимо", 19, bold=True, width=305)
     d.rounded_rectangle((434, 148, 1224, 316), radius=18, fill=PANEL)

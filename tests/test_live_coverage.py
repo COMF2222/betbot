@@ -181,8 +181,7 @@ async def test_low_confidence_delayed_analysis_is_published_once_to_both_destina
     assert service.bot.send_photo.await_count == 2
     for call in service.bot.send_photo.call_args_list:
         assert (
-            "Поздний разбор" in call.kwargs["caption"]
-            and "Нет выраженного" in call.kwargs["caption"]
+            "Поздний разбор" in call.kwargs["caption"] and "Слабый сигнал" in call.kwargs["caption"]
         )
     service.store.result(draft.match_id, {"radiant_win": True})
     stats = service.store.summary()
@@ -256,4 +255,4 @@ async def test_delayed_finished_games_are_not_published(service, draft):
 
 
 def test_caption_marks_weak_predictions(prediction):
-    assert "Нет выраженного" in caption(replace(prediction, signal=False))
+    assert "Слабый сигнал" in caption(replace(prediction, signal=False))

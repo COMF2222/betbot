@@ -955,7 +955,7 @@ def build_router(service: Service) -> Router:
                 p = Prediction.from_dict(json.loads(row["payload"]))
                 text = (
                     "📬 <b>Предпросмотр</b>\n\n"
-                    + caption(p)
+                    + caption(p, service.settings.quote_max_age_seconds, service.heroes)
                     + (f"\n\n{esc(notice, 300)}" if notice else "")
                 )
                 buttons = (

@@ -22,7 +22,7 @@ from .config import Settings
 from .domain import Draft, Prediction, timestamp, utcnow
 from .leagues import activity_snapshot, calendar_events
 from .model import History, Model
-from .presentation import MOSCOW, caption, explanation, render_card, result_text
+from .presentation import MOSCOW, caption, render_card, result_text
 from .providers import (
     HTTP,
     OddsFeed,
@@ -497,7 +497,7 @@ class Service:
                     admin,
                     BufferedInputFile(body, filename="draft.png"),
                     caption="<b>Предварительный просмотр</b>\n"
-                    + caption(p, self.settings.quote_max_age_seconds),
+                    + caption(p, self.settings.quote_max_age_seconds, self.heroes),
                     reply_markup=keyboard,
                 )
             except TelegramAPIError as exc:
@@ -537,7 +537,7 @@ class Service:
         ):
             return "Во время подготовки карточки данные устарели. Прогноз не опубликован."
         plans = self.store.plan_publication(forecast_id, self.destinations)
-        body = caption(p, self.settings.quote_max_age_seconds)
+        body = caption(p, self.settings.quote_max_age_seconds, self.heroes)
         sent, failed, uncertain = 0, 0, 0
         for target in plans:
             chat_id, topic_id = target["destination"], target["topic_id"]
@@ -576,7 +576,6 @@ class Service:
             self.store.finish_delivery(delivery, "sent", msg.message_id)
             self.store.health(f"Telegram {chat_id}", True, "Карточка доставлена")
             sent += 1
-            await self.send_explanation(forecast_id, p, msg.message_id, chat_id, topic_id)
         messages = [
             f"Прогноз опубликован: {sent} мест."
             if sent
@@ -591,28 +590,6 @@ class Service:
                 f"Исход отправки неизвестен для {uncertain} мест. Проверьте посты и используйте /confirm {forecast_id} forecast MESSAGE_ID CHAT_ID. Повторной отправки не будет."
             )
         return "\n".join(messages)
-
-    async def send_explanation(
-        self, forecast_id: int, p: Prediction, reply_to: int, chat_id=None, topic_id=None
-    ):
-        chat_id = chat_id if chat_id is not None else self.chat_id
-        if self.paused or not self.destination_enabled(chat_id):
-            return
-        delivery = self.store.begin_delivery(forecast_id, "explanation", chat_id, topic_id)
-        if not delivery:
-            return
-        try:
-            msg = await self.bot.send_message(
-                chat_id,
-                explanation(p, self.heroes, self.settings.quote_max_age_seconds),
-                reply_parameters=ReplyParameters(message_id=reply_to),
-                message_thread_id=topic_id,
-            )
-            self.store.finish_delivery(delivery, "sent", msg.message_id)
-        except (TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter) as exc:
-            self.store.finish_delivery(delivery, "failed", error=type(exc).__name__)
-        except Exception as exc:
-            self.store.finish_delivery(delivery, "uncertain", error=type(exc).__name__)
 
     async def publish_results(self):
         if not self.bot or self.paused:
@@ -637,7 +614,7 @@ class Service:
             try:
                 msg = await self.bot.send_message(
                     row["destination"],
-                    result_text(p, result),
+                    result_text(p, result, self.store.quote_snapshots(p.draft.match_id)),
                     reply_parameters=ReplyParameters(message_id=row["post_id"]),
                     message_thread_id=row["destination_topic_id"],
                 )
@@ -646,23 +623,6 @@ class Service:
                 self.store.finish_delivery(delivery, "failed", error=type(exc).__name__)
             except Exception as exc:
                 self.store.finish_delivery(delivery, "uncertain", error=type(exc).__name__)
-
-    async def publish_explanations(self):
-        if not self.bot or self.paused:
-            return
-        for row in self.store.publications():
-            if (
-                not self.paused
-                and self.destination_enabled(row["destination"])
-                and not self.store.delivery_sent(row["id"], "explanation", row["destination"])
-            ):
-                await self.send_explanation(
-                    row["id"],
-                    Prediction.from_dict(json.loads(row["payload"])),
-                    row["post_id"],
-                    row["destination"],
-                    row["destination_topic_id"],
-                )
 
     async def collect_results(self):
         unresolved = set(self.store.unresolved())
@@ -871,7 +831,6 @@ class Service:
                     )
                 except Exception as exc:
                     self.store.health("Разборы", False, type(exc).__name__)
-            await self.publish_explanations()
             await self.collect_results()
             if self.automatic and not self.paused:
                 for identity in self.store.pending_publications():

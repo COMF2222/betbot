@@ -1,11 +1,13 @@
 import html
+import math
 import re
+from datetime import timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from PIL import ImageFont
 
-from .domain import Prediction, best_quotes, utcnow
+from .domain import Prediction, Quote, best_quotes, timestamp, utcnow
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 
@@ -14,44 +16,100 @@ def esc(value: str, maximum: int = 100) -> str:
     return html.escape(str(value)[:maximum])
 
 
-def caption(p: Prediction, max_age: int = 30) -> str:
-    d = p.draft
-    map_label = f"карта {d.map_number}" if d.map_number else f"карта ID {d.match_id}"
-    result = [
-        f"🤖 <b>{esc(d.radiant_name, 45)} — {esc(d.dire_name, 45)}</b> · {map_label}",
-        f"Игроки + драфт: <b>{esc(p.favorite_name, 45)} {p.favorite_probability:.0%}</b>",
-        f"Только драфт: {p.draft_probability:.0%} / {1 - p.draft_probability:.0%}",
-        f"Безубыточный кэф по модели: {1 / p.favorite_probability:.2f} до расходов",
-    ]
-    if not p.signal:
-        result.insert(1, "⚖️ <b>Нет выраженного фаворита · слабый сигнал.</b>")
-    if p.late_analysis:
-        result.insert(
-            1,
-            "⏱ <b>Поздний разбор: карта идёт или источник задержан.</b> Отдельный учёт.",
-        )
-        result.append(
-            f"Часы источника: {max(0, d.game_time) // 60}:{max(0, d.game_time) % 60:02d} · DotaTV: {d.delay_seconds // 60} мин задержки. Модель получает только пики и составы."
-        )
+def stars(probability: float) -> str:
+    from .graphics import strength
+
+    return "★" * strength(probability)[0] or "☆"
+
+
+def short_reasons(p: Prediction, heroes: dict | None = None) -> str:
+    heroes = heroes or {}
+
+    def hero(identity):
+        return str(heroes.get(identity, {}).get("localized_name", f"Hero #{identity}"))
+
+    sign = 1 if p.favorite == "radiant" else -1
+    reasons = []
+    if sign * p.features.get("player_elo", 0) > 0.025:
+        reasons.append("Рейтинг игроков выше")
+    elif sign * p.features.get("hero_experience", 0) > 0.01:
+        reasons.append("Игроки успешнее на своих героях")
+    elif sign * p.features.get("team_elo", 0) > 0.025:
+        reasons.append("Команда сильнее по прошлым картам")
+    statistics = []
+    for item in p.analysis.get("counters", []):
+        if item.get("count", 0) >= 20 and item.get("win_rate", 0) >= 0.55:
+            statistics.append(
+                f"{hero(item['hero'])} против {hero(item['enemy'])}: {item['win_rate']:.0%} побед ({item['count']} карт)"
+            )
+    for item in p.analysis.get("lanes", []):
+        if item.get("count", 0) >= 20 and item.get("map_win_rate", 0) >= 0.55:
+            statistics.append(
+                f"связка {hero(item['core'])} + {hero(item['support'])}: {item['map_win_rate']:.0%} побед ({item['count']} карт)"
+            )
+    if statistics:
+        prefix = "по истории: " if not p.analysis.get("used_in_model", False) else ""
+        reasons += [prefix + item for item in statistics[: 2 - len(reasons)]]
+    if not reasons:
+        reasons.append("Небольшой перевес по сумме игроков и драфта")
+    return esc("; ".join(reasons), 260)
+
+
+def market_snapshot(p: Prediction, max_age=None, now=None):
+    from .reports import market_pair
+
     quotes = [
         q
         for q in p.quotes
-        if q.market == "map_winner" and q.outcome == p.favorite and q.fresh(utcnow(), max_age)
+        if q.market == "map_winner"
+        and q.match_id == p.draft.match_id
+        and q.map_number == p.draft.map_number
+        and q.active
+        and math.isfinite(q.odds)
+        and q.odds > 1
+        and (max_age is None or q.fresh(now or utcnow(), max_age))
     ]
-    if quotes:
-        result.append("\nКотировки на фаворита:")
-        for q in sorted(quotes, key=lambda q: q.odds, reverse=True)[:3]:
-            suffix = " · эквивалент до расходов" if q.gross else ""
-            result.append(f"{esc(q.source, 25)}: <b>{q.odds:.2f}</b>{suffix}")
-    else:
-        result.append("\nСвежей подтверждённой цены на эту карту нет.")
-    bucket = p.reliability.get("combined", {})
-    if bucket.get("count", 0) >= 100 and bucket.get("success_rate") is not None:
-        result.append(
-            f"\nПрошлый временной тест: {bucket['success_rate']:.0%} верных исходов в этой группе уверенности, {bucket['count']} карт. Все про-лиги."
+    pair = market_pair(quotes)
+    opponent = "dire" if p.favorite == "radiant" else "radiant"
+    if pair:
+        return pair["quotes"][p.favorite], pair["quotes"][opponent], pair[p.favorite]
+    own = sorted(
+        (q for q in quotes if q.outcome == p.favorite),
+        key=lambda q: (q.source != "Polymarket", -q.odds),
+    )
+    return (own[0], None, 1 / own[0].odds) if own else (None, None, None)
+
+
+def caption(p: Prediction, max_age: int = 30, heroes=None, now=None) -> str:
+    d = p.draft
+    opponent = d.dire_name if p.favorite == "radiant" else d.radiant_name
+    map_label = f"карта {d.map_number}" if d.map_number else f"карта ID {d.match_id}"
+    lines = [
+        f"🤖 <b>Бот за {esc(p.favorite_name, 45)} против {esc(opponent, 45)}</b>, {map_label}: <b>{p.favorite_probability:.0%}</b>, {stars(p.favorite_probability)}",
+        "",
+        "👉 " + short_reasons(p, heroes),
+    ]
+    info = []
+    if not p.signal:
+        info.append("Слабый сигнал.")
+    if max(p.draft_probability, 1 - p.draft_probability) < 0.55:
+        info.append("По одним героям ровно.")
+    elif (p.draft_probability >= 0.5) != (p.favorite == "radiant"):
+        info.append(
+            f"По одним героям за {esc(opponent, 45)} {max(p.draft_probability, 1 - p.draft_probability):.0%}."
         )
-    result.append("\nИтог карты будет ответом на этот прогноз.")
-    return "\n".join(result)
+    own, other, probability = market_snapshot(p, max_age, now)
+    if own:
+        line = f"Рынок: {esc(own.source, 25)} · {esc(p.favorite_name, 45)} <b>{own.odds:.2f}</b> ({probability:.0%})"
+        if other:
+            line += f", {esc(opponent, 45)} {other.odds:.2f}"
+        info.append(line)
+    else:
+        info.append("Рынок: кэф на эту карту пока недоступен.")
+    lines.append("ℹ️ " + " ".join(info))
+    if p.late_analysis:
+        lines.append("⏱ Поздний разбор · отдельный учёт.")
+    return "\n".join(lines)
 
 
 def explanation(p: Prediction, heroes: dict[int, dict], max_age: int = 30) -> str:
@@ -111,25 +169,81 @@ def explanation(p: Prediction, heroes: dict[int, dict], max_age: int = 30) -> st
     return "\n".join(lines)
 
 
-def result_text(p: Prediction, result: dict) -> str:
+def result_text(p: Prediction, result: dict, snapshots=None) -> str:
     radiant_win = result.get("radiant_win")
     if not isinstance(radiant_win, bool):
         return "ℹ️ Результат карты пока не подтверждён."
     win = radiant_win == (p.favorite == "radiant")
     winner = p.draft.radiant_name if radiant_win else p.draft.dire_name
     label = f"карту {p.draft.map_number}" if p.draft.map_number else f"карту ID {p.draft.match_id}"
-    lines = [
-        f"{'✅ Зашло' if win else '❌ Мимо'}: <b>{esc(winner, 60)}</b> выиграли {label}.",
-        f"Прогноз был: {esc(p.favorite_name, 60)} {p.favorite_probability:.0%}.",
-    ]
-    if p.late_analysis:
-        lines.append(
-            "⏱ Это результат разбора с задержкой; он учитывается отдельно от прогнозов сразу после драфта."
+    signal = f"{p.favorite_probability:.0%}, {stars(p.favorite_probability)}"
+    own, _, market_probability = market_snapshot(p)
+    price = f", кэф {own.odds:.2f}" if own else ""
+    if win:
+        lines = [f"✅ <b>Зашло: {esc(winner, 60)} взяли {label}</b>, {signal}{price}"]
+    else:
+        lines = [
+            f"❌ <b>Мимо: {label} взяли {esc(winner, 60)}</b>, бот был за {esc(p.favorite_name, 60)} с {signal}{price}"
+        ]
+    start = timestamp(result.get("start_time"))
+    finish = (
+        start + timedelta(seconds=int(result["duration"]))
+        if start and result.get("duration")
+        else None
+    )
+    observations = []
+    if own and finish:
+        for snapshot in snapshots or []:
+            when = timestamp(snapshot.get("observed_at"))
+            if not when or not max(start, p.draft.observed_at) <= when <= finish:
+                continue
+            for raw in snapshot.get("quotes", []):
+                q = Quote.from_dict(raw)
+                if (
+                    q.source,
+                    q.match_id,
+                    q.map_number,
+                    q.market,
+                    q.rules,
+                    q.gross,
+                    q.market_id,
+                ) != (
+                    own.source,
+                    own.match_id,
+                    own.map_number,
+                    own.market,
+                    own.rules,
+                    own.gross,
+                    own.market_id,
+                ) or not q.fresh(when, 30):
+                    continue
+                observations.append(q)
+    if win and observations:
+        peak = max((q.odds for q in observations if q.outcome == p.favorite), default=own.odds)
+        if peak > own.odds + 0.01:
+            lines[0] += f", по ходу до {peak:.2f}"
+    elif not win:
+        winner_side = "radiant" if radiant_win else "dire"
+        comeback = max(
+            (q for q in observations if q.outcome == winner_side),
+            key=lambda q: q.odds,
+            default=None,
         )
+        if comeback and 1 / comeback.odds <= 0.15:
+            lines.append(
+                f"👉 По ходу цена {esc(winner, 45)} падала до {1 / comeback.odds:.0%} (кэф {comeback.odds:.2f}), но они выиграли карту"
+            )
+        if market_probability is not None:
+            expected = p.favorite_name if market_probability >= 0.5 else winner
+            probability = max(market_probability, 1 - market_probability)
+            lines.append(
+                f"ℹ️ Рынок {'тоже ' if market_probability >= 0.5 else ''}ждал {esc(expected, 45)} ({probability:.0%})"
+            )
+    if p.late_analysis:
+        lines.append("⏱ Поздний разбор · отдельный учёт.")
     if result.get("duration"):
         seconds = int(result["duration"])
-        lines.append(f"Длительность: {seconds // 60}:{seconds % 60:02d}.")
-        for total in p.totals[:8]:
+        for total in p.totals[:3]:
             line_seconds = total["line"] * 60
             label = ("ТБ" if total["outcome"] == "over" else "ТМ") + f" {total['line']:g} мин"
             if seconds == line_seconds:
@@ -141,15 +255,6 @@ def result_text(p: Prediction, result: dict) -> str:
                 lines.append(
                     f"{'✅' if won else '❌'} {label} · {esc(total['source'], 25)} {total['odds']:.2f}."
                 )
-    quotes = [q for q in p.quotes if q.market == "map_winner" and q.outcome == p.favorite]
-    if quotes:
-        lines.append(
-            "Цены в момент прогноза: "
-            + "; ".join(
-                f"{esc(q.source, 25)} {q.odds:.2f}{' до расходов' if q.gross else ''}"
-                for q in quotes[:5]
-            )
-        )
     return "\n".join(lines)
 
 

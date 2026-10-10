@@ -87,7 +87,7 @@ async def test_forecast_then_result_reply_use_original_chat_message_and_topic(se
     assert last_call.kwargs["reply_parameters"].message_id == 100
     assert last_call.kwargs["message_thread_id"] == 9
     await service.publish_results()
-    assert service.bot.send_message.await_count == 2  # Explanation plus one result.
+    assert service.bot.send_message.await_count == 1
     assert json.loads(service.store.forecast(id_)["payload"])["radiant_probability"] == 0.58
 
 
@@ -195,7 +195,7 @@ async def test_tournament_cache_preserves_recent_games_if_live_source_fails(serv
     )
 
 
-async def test_forecast_explanation_and_result_fan_out_with_separate_post_ids(service, draft):
+async def test_forecast_and_result_fan_out_with_separate_post_ids(service, draft):
     service.store.destination(-100, "Group", "supergroup", 9)
     service.store.destination(-200, "Channel", "channel", 99)  # Channel must clear a group topic.
     identity = await service.process_draft(draft)
@@ -209,11 +209,7 @@ async def test_forecast_explanation_and_result_fan_out_with_separate_post_ids(se
     )
     await service.publish(identity)
     assert service.bot.send_photo.await_count == 2
-    explanations = service.bot.send_message.call_args_list
-    assert [
-        (c.args[0], c.kwargs["reply_parameters"].message_id, c.kwargs["message_thread_id"])
-        for c in explanations
-    ] == [(-100, 101, 9), (-200, 201, None)]
+    service.bot.send_message.assert_not_awaited()
     service.store.result(draft.match_id, {"radiant_win": True})
     await service.publish_results()
     replies = service.bot.send_message.call_args_list[-2:]
@@ -223,7 +219,7 @@ async def test_forecast_explanation_and_result_fan_out_with_separate_post_ids(se
     ]
     await service.publish(identity)
     await service.publish_results()
-    assert service.bot.send_photo.await_count == 2 and service.bot.send_message.await_count == 4
+    assert service.bot.send_photo.await_count == 2 and service.bot.send_message.await_count == 2
     assert service.store.summary()["published"] == 1
 
 
@@ -313,7 +309,9 @@ async def test_disabling_channel_during_group_send_prevents_next_send(service, d
     assert service.bot.send_photo.call_args.args[0] == -100
 
 
-async def test_confirmed_ambiguous_forecast_gets_its_own_explanation(service, draft):
+async def test_confirmed_ambiguous_forecast_gets_its_result_without_extra_explanation(
+    service, draft
+):
     identity = await service.process_draft(draft)
     service.bot = SimpleNamespace(
         send_photo=AsyncMock(side_effect=TimeoutError()),
@@ -321,8 +319,10 @@ async def test_confirmed_ambiguous_forecast_gets_its_own_explanation(service, dr
     )
     await service.publish(identity)
     assert service.store.confirm_delivery(identity, "forecast", 100, -100)
-    await service.publish_explanations()
-    await service.publish_explanations()
+    service.bot.send_message.assert_not_awaited()
+    service.store.result(draft.match_id, {"radiant_win": True})
+    await service.publish_results()
+    await service.publish_results()
     service.bot.send_message.assert_awaited_once()
     assert service.bot.send_message.call_args.kwargs["reply_parameters"].message_id == 100
 
