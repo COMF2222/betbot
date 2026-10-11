@@ -1,0 +1,16 @@
+{
+  "matched_maps": 442,
+  "maximum_probability_difference": 2.220446049250313e-16,
+  "all_maps": {
+    "count": 442,
+    "wins": 291,
+    "accuracy": 0.6583710407239819,
+    "brier": 0.21829835484144477,
+    "elo_accuracy": 0.6380090497737556,
+    "elo_brier": 0.22540335116259927
+  },
+  "version": "glicko-team-research-v1-5585fd76bb2b",
+  "history_cutoff": "2026-06-09T20:27:36+00:00",
+  "publication_ready": false,
+  "live_model_changed": false
+}

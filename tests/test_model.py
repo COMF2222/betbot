@@ -40,7 +40,7 @@ def test_temporal_split_purges_series_crossing_boundaries():
         assert not {rows[i]["series_id"] for i in left} & {rows[i]["series_id"] for i in right}
 
 
-@pytest.mark.parametrize("feature_set", ["classic", "signatures"])
+@pytest.mark.parametrize("feature_set", ["classic", "signatures", "glicko_team"])
 def test_fit_and_safe_json_model_roundtrip(tmp_path, draft, feature_set):
     path = tmp_path / "model.json"
     report = fit(history_rows(), path, feature_set=feature_set)
@@ -94,3 +94,38 @@ def test_roster_experiment_detects_replacement_without_using_current_result(draf
     assert original["roster_retention"] == 0
     assert features["roster_retention"] < 0
     assert features["team_elo"] == original["team_elo"]
+
+
+def test_glicko_history_roundtrip_preserves_ratings_and_result_availability(draft):
+    history = History()
+    history.features(draft, feature_set="glicko_team")
+    available = draft.observed_at.timestamp() + 1800
+    history.update(draft, True, {"_result_available_at": available})
+    assert history.glicko_teams.values[draft.radiant_id][2] == available
+    later = replace(draft, observed_at=draft.observed_at + timedelta(hours=2))
+    restored = History(history.export())
+    assert restored.features(later, feature_set="glicko_team") == history.features(
+        later, feature_set="glicko_team"
+    )
+
+
+def test_classic_history_does_not_activate_experimental_state(draft):
+    history = History()
+    history.features(draft)
+    history.update(draft, True)
+    assert "glicko_teams" not in history.export()
+
+
+def test_experimental_publication_requires_explicit_approval_and_retains_quality_guard(tmp_path):
+    model = Model(tmp_path / "absent.json")
+    model.raw = {
+        "feature_set": "glicko_team",
+        "report": {"publication_ready": False, "test": 300, "brier": 0.22, "team_elo_brier": 0.24},
+    }
+    assert not model.publication_ready
+    model.raw["deployment_approval"] = {"approved": True}
+    assert model.publication_ready
+    model.raw["report"]["brier"] = 0.25
+    assert not model.publication_ready
+    model.raw["report"].update({"brier": 0.22, "test": 100})
+    assert not model.publication_ready

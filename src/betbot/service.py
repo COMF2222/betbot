@@ -295,7 +295,10 @@ class Service:
             for available, identity, draft, result in sorted(
                 pending, key=lambda item: (item[0], item[1])
             ):
-                history.update(draft, result["radiant_win"], result.get("context"))
+                context = dict(result.get("context") or {})
+                if history.glicko_teams is not None:
+                    context["_result_available_at"] = available.timestamp()
+                history.update(draft, result["radiant_win"], context)
                 applied.add(identity)
                 state["as_of"] = max(timestamp(state["as_of"]), available).isoformat()
             state["history"] = history.export()

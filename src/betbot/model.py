@@ -12,6 +12,7 @@ import numpy as np
 from .analytics import DraftAnalytics
 from .domain import Draft, Player, Prediction, timestamp, utcnow
 from .form import FormHistory, PlayerSkills
+from .glicko import Glicko
 from .signatures import SignatureHistory
 
 FEATURE_SETS = (
@@ -24,6 +25,7 @@ FEATURE_SETS = (
     "players",
     "players_form",
     "signatures",
+    "glicko_team",
 )
 
 
@@ -43,9 +45,10 @@ class History:
         self.form = FormHistory(raw.get("form"))
         self.player_skills = PlayerSkills(raw.get("player_skills"))
         self.signatures = SignatureHistory(raw.get("signatures"))
+        self.glicko_teams = Glicko(raw["glicko_teams"]) if "glicko_teams" in raw else None
 
     def export(self) -> dict:
-        return {
+        result = {
             "teams": dict(self.teams),
             "players": dict(self.players),
             "player_heroes": dict(self.player_heroes),
@@ -56,6 +59,9 @@ class History:
             "player_skills": self.player_skills.ratings,
             "signatures": self.signatures.export(),
         }
+        if self.glicko_teams is not None:
+            result["glicko_teams"] = self.glicko_teams.export()
+        return result
 
     def features(
         self, draft: Draft, combined: bool = True, feature_set: str = "classic"
@@ -93,6 +99,14 @@ class History:
                 )
 
             features["hero_experience"] = experience(draft.radiant) - experience(draft.dire)
+            if feature_set == "glicko_team":
+                if self.glicko_teams is None:
+                    self.glicko_teams = Glicko()
+                features.update(
+                    self.glicko_teams.team_features(
+                        draft.radiant_id, draft.dire_id, draft.observed_at.timestamp()
+                    )
+                )
             if feature_set in ("roster", "form", "adaptive", "players_form"):
 
                 def retention(team_id, players):
@@ -167,6 +181,16 @@ class History:
         return result
 
     def update(self, draft: Draft, radiant_win: bool, context: dict | None = None) -> None:
+        if self.glicko_teams is not None:
+            context = context or {}
+            available = context.get("_result_available_at")
+            if not isinstance(available, (int, float)):
+                available = draft.observed_at.timestamp()
+                if isinstance(context.get("duration"), (int, float)):
+                    available = (
+                        float(context.get("start_time") or available) + context["duration"] + 60
+                    )
+            self.glicko_teams.update_teams(draft.radiant_id, draft.dire_id, radiant_win, available)
         rid, did = str(draft.radiant_id), str(draft.dire_id)
         expected = 1 / (1 + 10 ** ((self.teams[did] - self.teams[rid]) / 400))
         self.form.update(draft, radiant_win, expected)
@@ -397,7 +421,9 @@ def fit(rows: list[dict], output: Path, feature_set: str = "classic") -> dict:
         ),
         "calibration_bins": bins,
         "reliability": {},
-        "publication_ready": bool(len(test) >= 200 and brier < baseline_brier),
+        "publication_ready": bool(
+            feature_set != "glicko_team" and len(test) >= 200 and brier < baseline_brier
+        ),
         "limitations": [
             "Результаты относятся к этой временной выборке, а не гарантируют будущую точность",
             "Роли и патч используются только при наличии этих полей",
@@ -441,8 +467,9 @@ def fit(rows: list[dict], output: Path, feature_set: str = "classic") -> dict:
     ).hexdigest()[:12]
     artifact = {
         "schema": 1,
-        "version": f"{ {'classic': 'logistic-v2', 'roster': 'roster-v1', 'detailed': 'draft-v3', 'form': 'form-v1', 'matchups': 'matchups-v1', 'adaptive': 'adaptive-v1', 'players': 'players-v1', 'players_form': 'players-form-v1', 'signatures': 'signatures-v1'}[feature_set] }-{fingerprint}",
+        "version": f"{ {'classic': 'logistic-v2', 'roster': 'roster-v1', 'detailed': 'draft-v3', 'form': 'form-v1', 'matchups': 'matchups-v1', 'adaptive': 'adaptive-v1', 'players': 'players-v1', 'players_form': 'players-form-v1', 'signatures': 'signatures-v1', 'glicko_team': 'glicko-team-research-v1'}[feature_set] }-{fingerprint}",
         "feature_set": feature_set,
+        "experimental": feature_set == "glicko_team",
         "created_at": utcnow().isoformat(),
         "history_cutoff": timestamp(
             max(int(r["start_time"]) + int(r["duration"]) + 60 for r in rows)
@@ -486,6 +513,8 @@ class Model:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
             if raw.get("schema") != 1:
                 raise ValueError("Неизвестная версия модели")
+            if raw.get("feature_set") == "glicko_team" and "glicko_teams" not in raw["history"]:
+                raise ValueError("В экспериментальной модели отсутствует история Glicko")
             self.raw, self.mtime = raw, mtime
 
     @property
@@ -494,7 +523,18 @@ class Model:
 
     @property
     def publication_ready(self) -> bool:
-        return bool(self.raw and self.raw["report"]["publication_ready"])
+        if not self.raw:
+            return False
+        report = self.raw["report"]
+        if report["publication_ready"]:
+            return True
+        approval = self.raw.get("deployment_approval") or {}
+        return bool(
+            self.raw.get("feature_set") == "glicko_team"
+            and approval.get("approved") is True
+            and report["test"] >= 200
+            and report["brier"] < report["team_elo_brier"]
+        )
 
     def predict(
         self, draft: Draft, history: History | None = None, history_as_of: str = ""
@@ -603,6 +643,7 @@ class Model:
                 "roster_elo",
             )
             or key.startswith("signature_")
+            or key.startswith("evidence:glicko_")
         ]
         analysis["used_in_model"] = feature_set == "detailed"
         if feature_set in ("matchups", "adaptive"):
@@ -612,6 +653,10 @@ class Model:
         elif feature_set == "signatures":
             reasons.append(
                 "Модель учитывает частоту выбора героя игроком, опыт, недавние результаты и текущий патч с поправкой на соперников и объём выборки."
+            )
+        elif feature_set == "glicko_team":
+            reasons.append(
+                "Рейтинг команд Glicko учитывает неопределённость и перерывы в играх. Это экспериментальная модель для отдельной проверки."
             )
         elif not analysis["used_in_model"]:
             reasons.append(

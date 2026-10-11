@@ -6,9 +6,10 @@ import math
 from collections import Counter, defaultdict
 
 from .backtest import score_event
+from .glicko import Glicko, glicko_g
+from .glicko import glicko_update as glicko_update
 from .model import historical_draft
 
-Q = math.log(10) / 400
 EVEN_EVIDENCE_FEATURES = frozenset(("evidence:roster_min", "evidence:tier1"))
 EVIDENCE_VIEWS = frozenset(
     (
@@ -66,43 +67,6 @@ def evidence_view(features, base, name):
             }
         )
     return result
-
-
-def glicko_g(rd):
-    return 1 / math.sqrt(1 + 3 * Q**2 * rd**2 / math.pi**2)
-
-
-def glicko_update(rating, rd, opponents):
-    """Glickman's Glicko-1 period update, with all opponents fixed before updating."""
-    information = residual = 0.0
-    for opponent, opponent_rd, won in opponents:
-        g = glicko_g(opponent_rd)
-        expected = 1 / (1 + math.exp(max(-35, min(35, -Q * g * (rating - opponent)))))
-        information += Q**2 * g**2 * expected * (1 - expected)
-        residual += g * (int(won) - expected)
-    variance = 1 / (1 / rd**2 + information)
-    return rating + Q * variance * residual, math.sqrt(variance)
-
-
-class Glicko:
-    def __init__(self):
-        self.values = {}
-
-    def get(self, identity, when):
-        rating, rd, last = self.values.get(identity, (1500.0, 350.0, when))
-        days = max(0.0, when - last) / 86400
-        # A typical RD=50 becomes RD=350 after 180 inactive days. No fitted tuning.
-        rd = min(350.0, math.sqrt(rd**2 + (350**2 - 50**2) / 180 * days))
-        return rating, rd
-
-    def set_result(self, identity, own, other, won, when):
-        rating, rd = glicko_update(*own, [(*other, won)])
-        self.values[identity] = rating, max(30.0, rd), when
-
-    def squad(self, players, when):
-        values = [self.get(p.account_id, when) if p.account_id else (1500, 350) for p in players]
-        # Teammates' uncertainty is correlated. Use RMS, not an independence assumption.
-        return sum(r for r, _ in values) / 5, math.sqrt(sum(rd**2 for _, rd in values) / 5)
 
 
 class EvidenceHistory:
