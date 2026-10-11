@@ -1,0 +1,2061 @@
+{
+  "runs": [
+    {
+      "title": "Архитектура и признаки",
+      "directory": "model-research-2026-10-11",
+      "plan_path": "model-experiments-2026-10-11.json",
+      "preregistration_commit": "4e69a85",
+      "protocol": {
+        "plan": {
+          "schema": 1,
+          "name": "round-2-2026-10-11",
+          "seed": 42,
+          "primary_metric": "brier",
+          "selection": "Lowest mean development Brier, accuracy no worse in aggregate and Brier no worse in either chronological fold",
+          "development_prefixes": [
+            0.7,
+            1.0
+          ],
+          "minimum_brier_improvement": 0.0005,
+          "promotion": "No automatic promotion; require improved Tier 1 accuracy and Brier, uncertainty excluding regression, and a fresh prospective check",
+          "candidates": [
+            {
+              "name": "baseline",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "hypothesis": "Control reproducing the current training and calibration recipe"
+            },
+            {
+              "name": "stronger_regularization",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.05,
+              "hypothesis": "Reduce noisy hero and pair coefficients learned on small samples"
+            },
+            {
+              "name": "recent_training",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "half_life_days": 90,
+              "hypothesis": "Give recent maps more weight when team strength and the meta change"
+            },
+            {
+              "name": "balanced_sides",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "mirror": true,
+              "hypothesis": "Reduce incidental side-specific correlations by training on both views of each old map"
+            },
+            {
+              "name": "role_interactions",
+              "kind": "linear",
+              "features": "interactions",
+              "C": 0.15,
+              "hypothesis": "Combine form, matchups and hero experience with specific core roles and player-rating distribution"
+            },
+            {
+              "name": "nonlinear_shallow",
+              "kind": "hist_gradient",
+              "features": "compact",
+              "max_depth": 3,
+              "max_leaf_nodes": 8,
+              "min_samples_leaf": 80,
+              "max_iter": 150,
+              "hypothesis": "Learn conditional interactions between draft, experience and actual lineup ratings"
+            },
+            {
+              "name": "nonlinear_deeper",
+              "kind": "hist_gradient",
+              "features": "compact",
+              "max_depth": 4,
+              "max_leaf_nodes": 15,
+              "min_samples_leaf": 100,
+              "max_iter": 200,
+              "hypothesis": "Capture more complex draft combinations while retaining large leaves and regularization"
+            }
+          ],
+          "excluded_previous_ideas": [
+            "form only",
+            "roster only",
+            "matchups only",
+            "players only",
+            "players_form",
+            "signatures only"
+          ],
+          "guardrails": [
+            "No current-map result or performance in inputs",
+            "Previous results available only after finish plus 60 seconds",
+            "Purge series across temporal boundaries",
+            "Fit vectorizer and estimator only on the training fold",
+            "Calibrate only on the following calibration fold",
+            "Disable random internal early-stopping split",
+            "Same full Tier 1 coverage and same map IDs",
+            "Never modify data/model.json or existing forecasts"
+          ]
+        },
+        "plan_sha256": "db0ae147bfa10eef6f1f6859b5110480e8348edd815f11ecc4ea27e48eb9aa0e",
+        "data_sha256": "2144fb0760ae25d7701fbb1483a87f9305760c74076097ac2a889cfb330ce13e",
+        "history_maps_before_period": 18231,
+        "requested_start": "2026-06-10T00:00:00+03:00",
+        "requested_end": "2026-10-10T18:53:18.481928+03:00",
+        "heldout_scope": {
+          "tier": 1,
+          "classification": "Liquipedia Tier 1, verified 2026-10-10",
+          "source": "https://liquipedia.net/dota2/Tier_1_Tournaments",
+          "events": [
+            {
+              "league_id": 19785,
+              "name": "Esports World Cup 2026",
+              "start_date": "2026-07-07",
+              "end_date": "2026-07-19",
+              "source": "https://liquipedia.net/dota2/Tier_1_Tournaments"
+            },
+            {
+              "league_id": 20009,
+              "name": "1win Essence II",
+              "start_date": "2026-07-30",
+              "end_date": "2026-08-05",
+              "source": "https://liquipedia.net/dota2/Tier_1_Tournaments"
+            },
+            {
+              "league_id": 19719,
+              "name": "The International 2026",
+              "start_date": "2026-08-13",
+              "end_date": "2026-08-23",
+              "source": "https://liquipedia.net/dota2/The_International/2026"
+            },
+            {
+              "league_id": 19102,
+              "name": "BLAST SLAM VIII",
+              "start_date": "2026-09-29",
+              "end_date": "2026-10-11",
+              "source": "https://liquipedia.net/dota2/BLAST/Slam/8"
+            }
+          ],
+          "excluded": [
+            {
+              "league_id": 20279,
+              "name": "PGL Wallachia Season 9",
+              "reason": "Liquipedia identifies this edition as Tier 2",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/9"
+            },
+            {
+              "league_id": 19917,
+              "name": "Games of the Future 2026",
+              "reason": "Liquipedia Tier 2",
+              "source": "https://liquipedia.net/dota2/Recent_Tournament_Results"
+            }
+          ],
+          "notes": [
+            "Main events only: regional and open qualifiers are separate leagues and excluded",
+            "Event dates are checked in addition to league IDs to protect against IDs reused between seasons",
+            "BLAST SLAM VIII is still in progress at the end of the evaluation window",
+            "OpenDota premium is not used as a synonym for Liquipedia Tier 1"
+          ]
+        },
+        "holdout_already_examined_in_previous_work": true
+      },
+      "results": {
+        "plan": "round-2-2026-10-11",
+        "development": {
+          "baseline": [
+            {
+              "fold": 0,
+              "test_start": 1771685093,
+              "test_end": 1774607327,
+              "count": 2539,
+              "wins": 1491,
+              "accuracy": 0.587239070500197,
+              "brier": 0.23827137175832747,
+              "log_loss": 0.6690728965350918
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1781034583,
+              "count": 3641,
+              "wins": 2049,
+              "accuracy": 0.5627574842076353,
+              "brier": 0.24123738771948453,
+              "log_loss": 0.6748116381898587
+            }
+          ],
+          "stronger_regularization": [
+            {
+              "fold": 0,
+              "test_start": 1771685093,
+              "test_end": 1774607327,
+              "count": 2539,
+              "wins": 1484,
+              "accuracy": 0.5844820795588814,
+              "brier": 0.23785721764564138,
+              "log_loss": 0.6681988562211424
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1781034583,
+              "count": 3641,
+              "wins": 2061,
+              "accuracy": 0.5660532820653666,
+              "brier": 0.24059606430072283,
+              "log_loss": 0.6734206970002077
+            }
+          ],
+          "recent_training": [
+            {
+              "fold": 0,
+              "test_start": 1771685093,
+              "test_end": 1774607327,
+              "count": 2539,
+              "wins": 1501,
+              "accuracy": 0.5911776289877905,
+              "brier": 0.23821757535505045,
+              "log_loss": 0.6689526970354595
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1781034583,
+              "count": 3641,
+              "wins": 2049,
+              "accuracy": 0.5627574842076353,
+              "brier": 0.24117774021675203,
+              "log_loss": 0.674711885130118
+            }
+          ],
+          "balanced_sides": [
+            {
+              "fold": 0,
+              "test_start": 1771685093,
+              "test_end": 1774607327,
+              "count": 2539,
+              "wins": 1497,
+              "accuracy": 0.589602205592753,
+              "brier": 0.23823848036818857,
+              "log_loss": 0.6690053439305718
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1781034583,
+              "count": 3641,
+              "wins": 2055,
+              "accuracy": 0.564405383136501,
+              "brier": 0.24128229111432717,
+              "log_loss": 0.6749023385434992
+            }
+          ],
+          "role_interactions": [
+            {
+              "fold": 0,
+              "test_start": 1771685093,
+              "test_end": 1774607327,
+              "count": 2539,
+              "wins": 1458,
+              "accuracy": 0.5742418274911383,
+              "brier": 0.23832760145488857,
+              "log_loss": 0.6690879000715704
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1781034583,
+              "count": 3641,
+              "wins": 2046,
+              "accuracy": 0.5619335347432024,
+              "brier": 0.2416210656527363,
+              "log_loss": 0.6755940371771082
+            }
+          ],
+          "nonlinear_shallow": [
+            {
+              "fold": 0,
+              "test_start": 1771685093,
+              "test_end": 1774607327,
+              "count": 2539,
+              "wins": 1495,
+              "accuracy": 0.5888144938952343,
+              "brier": 0.23799508185737828,
+              "log_loss": 0.6683893278188123
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1781034583,
+              "count": 3641,
+              "wins": 2085,
+              "accuracy": 0.5726448777808294,
+              "brier": 0.23736902595462292,
+              "log_loss": 0.6665669726138744
+            }
+          ],
+          "nonlinear_deeper": [
+            {
+              "fold": 0,
+              "test_start": 1771685093,
+              "test_end": 1774607327,
+              "count": 2539,
+              "wins": 1492,
+              "accuracy": 0.5876329263489563,
+              "brier": 0.2374432036271618,
+              "log_loss": 0.6672507954625486
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1781034583,
+              "count": 3641,
+              "wins": 2113,
+              "accuracy": 0.5803350727822026,
+              "brier": 0.23724927563887474,
+              "log_loss": 0.666352061041308
+            }
+          ]
+        },
+        "selected_candidate": "nonlinear_deeper",
+        "tier1": {
+          "baseline": {
+            "count": 442,
+            "wins": 285,
+            "accuracy": 0.6447963800904978,
+            "brier": 0.22342395642918006,
+            "log_loss": 0.6379755587749459
+          },
+          "candidate": {
+            "count": 442,
+            "wins": 281,
+            "accuracy": 0.6357466063348416,
+            "brier": 0.22330867913426977,
+            "log_loss": 0.6379759725182771
+          },
+          "series_blocks": 200,
+          "brier_difference_95_interval": [
+            -0.004578397566378574,
+            0.004524854841475546
+          ],
+          "accuracy_difference_95_interval": [
+            -0.043485396251545995,
+            0.024553571428571428
+          ],
+          "established_baseline": {
+            "count": 442,
+            "wins": 285,
+            "accuracy": 0.6447963800904978,
+            "brier": 0.22342395642918006,
+            "elo_accuracy": 0.6380090497737556,
+            "elo_brier": 0.22540335116259927
+          },
+          "full_coverage": true,
+          "by_league": [
+            {
+              "league_id": 19102,
+              "baseline": {
+                "count": 79,
+                "wins": 50,
+                "accuracy": 0.6329113924050633,
+                "brier": 0.22485103129526005,
+                "log_loss": 0.6407680895239011
+              },
+              "candidate": {
+                "count": 79,
+                "wins": 46,
+                "accuracy": 0.5822784810126582,
+                "brier": 0.22721708171398014,
+                "log_loss": 0.6460470070341067
+              }
+            },
+            {
+              "league_id": 19719,
+              "baseline": {
+                "count": 147,
+                "wins": 91,
+                "accuracy": 0.6190476190476191,
+                "brier": 0.23137978675335177,
+                "log_loss": 0.6549450972572166
+              },
+              "candidate": {
+                "count": 147,
+                "wins": 84,
+                "accuracy": 0.5714285714285714,
+                "brier": 0.23598579085567026,
+                "log_loss": 0.6643492052473235
+              }
+            },
+            {
+              "league_id": 19785,
+              "baseline": {
+                "count": 156,
+                "wins": 108,
+                "accuracy": 0.6923076923076923,
+                "brier": 0.2070357168418876,
+                "log_loss": 0.6035906495306855
+              },
+              "candidate": {
+                "count": 156,
+                "wins": 115,
+                "accuracy": 0.7371794871794872,
+                "brier": 0.20409159973168187,
+                "log_loss": 0.5982521508512721
+              }
+            },
+            {
+              "league_id": 20009,
+              "baseline": {
+                "count": 60,
+                "wins": 36,
+                "accuracy": 0.6,
+                "brier": 0.24466261315491442,
+                "log_loss": 0.682124121375669
+              },
+              "candidate": {
+                "count": 60,
+                "wins": 36,
+                "accuracy": 0.6,
+                "brier": 0.23706809846694835,
+                "log_loss": 0.6660166265538173
+              }
+            }
+          ]
+        },
+        "promotion_recommended": false,
+        "promoted": false
+      }
+    },
+    {
+      "title": "Обучение для Tier 1",
+      "directory": "model-research-tier1-2026-10-11",
+      "plan_path": "model-experiments-tier1-2026-10-11.json",
+      "preregistration_commit": "b2b16e1",
+      "protocol": {
+        "plan": {
+          "schema": 1,
+          "name": "round-3-tier1-domain-2026-10-11",
+          "seed": 42,
+          "primary_metric": "brier",
+          "development_prefixes": [
+            0.7,
+            1.0
+          ],
+          "development_scope_path": "tier1-training-2025-2026.json",
+          "training_scope_path": "tier1-training-2025-2026.json",
+          "minimum_brier_improvement": 0.0005,
+          "selection": "Lowest mean development Tier 1 Brier, accuracy no worse in aggregate and Brier no worse in either chronological fold",
+          "promotion": "No automatic promotion; four-month retrospective comparison cannot replace a fresh prospective check",
+          "candidates": [
+            {
+              "name": "baseline",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "hypothesis": "Control with the original global training and calibration"
+            },
+            {
+              "name": "tier1_calibration",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "target_calibration": true,
+              "hypothesis": "Calibrate scores on earlier main Tier 1 games instead of small leagues"
+            },
+            {
+              "name": "tier1_weight_4",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "tier_multiplier": 4,
+              "hypothesis": "Raise the influence of verified top-level main-event maps during fitting"
+            },
+            {
+              "name": "tier1_weight_12_calibrated",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "tier_multiplier": 12,
+              "target_calibration": true,
+              "hypothesis": "Emphasize top-level examples in both weights and probability calibration"
+            },
+            {
+              "name": "tier1_only",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "target_training": true,
+              "target_calibration": true,
+              "hypothesis": "Exclude lower-level maps from fitting while preserving causal player history"
+            },
+            {
+              "name": "tier1_role_interactions",
+              "kind": "linear",
+              "features": "interactions",
+              "C": 0.15,
+              "tier_multiplier": 4,
+              "target_calibration": true,
+              "hypothesis": "Learn role and experience interactions specifically for top-level games"
+            },
+            {
+              "name": "tier1_nonlinear",
+              "kind": "hist_gradient",
+              "features": "compact",
+              "tier_multiplier": 4,
+              "target_calibration": true,
+              "max_depth": 3,
+              "max_leaf_nodes": 8,
+              "min_samples_leaf": 80,
+              "max_iter": 150,
+              "hypothesis": "Change the target domain of nonlinear training and calibration to top-level play"
+            }
+          ],
+          "excluded_previous_ideas": [
+            "Unweighted nonlinear_deeper rejected after round 2",
+            "No retuning of round-2 candidates on four-month outcomes"
+          ],
+          "guardrails": [
+            "All temporal and series boundaries retained",
+            "Verified league IDs AND date windows required",
+            "Development selection restricted to earlier Tier 1 main maps",
+            "Four-month scoring uses unchanged 442-map scope",
+            "No model replacement or publications during experiments"
+          ]
+        },
+        "plan_sha256": "588493c4b8e01264d66c30eb26a688dc1904e80a1133b8596b664c5a02478064",
+        "implementation_sha256": "8dc1acbf2cb6c26b2aa732c09224727dc2a99850a96ba516fe5110c1695494cf",
+        "data_sha256": "2144fb0760ae25d7701fbb1483a87f9305760c74076097ac2a889cfb330ce13e",
+        "history_maps_before_period": 18231,
+        "requested_start": "2026-06-10T00:00:00+03:00",
+        "requested_end": "2026-10-10T18:53:18.481928+03:00",
+        "heldout_scope": {
+          "tier": 1,
+          "classification": "Liquipedia Tier 1, verified 2026-10-10",
+          "source": "https://liquipedia.net/dota2/Tier_1_Tournaments",
+          "events": [
+            {
+              "league_id": 19785,
+              "name": "Esports World Cup 2026",
+              "start_date": "2026-07-07",
+              "end_date": "2026-07-19",
+              "source": "https://liquipedia.net/dota2/Tier_1_Tournaments"
+            },
+            {
+              "league_id": 20009,
+              "name": "1win Essence II",
+              "start_date": "2026-07-30",
+              "end_date": "2026-08-05",
+              "source": "https://liquipedia.net/dota2/Tier_1_Tournaments"
+            },
+            {
+              "league_id": 19719,
+              "name": "The International 2026",
+              "start_date": "2026-08-13",
+              "end_date": "2026-08-23",
+              "source": "https://liquipedia.net/dota2/The_International/2026"
+            },
+            {
+              "league_id": 19102,
+              "name": "BLAST SLAM VIII",
+              "start_date": "2026-09-29",
+              "end_date": "2026-10-11",
+              "source": "https://liquipedia.net/dota2/BLAST/Slam/8"
+            }
+          ],
+          "excluded": [
+            {
+              "league_id": 20279,
+              "name": "PGL Wallachia Season 9",
+              "reason": "Liquipedia identifies this edition as Tier 2",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/9"
+            },
+            {
+              "league_id": 19917,
+              "name": "Games of the Future 2026",
+              "reason": "Liquipedia Tier 2",
+              "source": "https://liquipedia.net/dota2/Recent_Tournament_Results"
+            }
+          ],
+          "notes": [
+            "Main events only: regional and open qualifiers are separate leagues and excluded",
+            "Event dates are checked in addition to league IDs to protect against IDs reused between seasons",
+            "BLAST SLAM VIII is still in progress at the end of the evaluation window",
+            "OpenDota premium is not used as a synonym for Liquipedia Tier 1"
+          ]
+        },
+        "development_scope": {
+          "tier": 1,
+          "classification": "Verified subset of Liquipedia Tier 1 main events; not an exhaustive list",
+          "verified_at": "2026-10-11",
+          "events": [
+            {
+              "league_id": 18920,
+              "name": "PGL Wallachia Season 6",
+              "start_date": "2025-11-15",
+              "end_date": "2025-11-23",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/6",
+              "classification_source": "https://liquipedia.net/dota2/ODPixel/Broadcasts"
+            },
+            {
+              "league_id": 17420,
+              "name": "BLAST SLAM V",
+              "start_date": "2025-11-25",
+              "end_date": "2025-12-07",
+              "source": "https://liquipedia.net/dota2/BLAST/SLAM/5"
+            },
+            {
+              "league_id": 18988,
+              "name": "DreamLeague Season 27",
+              "start_date": "2025-12-10",
+              "end_date": "2025-12-21",
+              "source": "https://liquipedia.net/dota2/DreamLeague/27",
+              "classification_source": "https://liquipedia.net/dota2/ODPixel/Broadcasts"
+            },
+            {
+              "league_id": 19099,
+              "name": "BLAST SLAM VI",
+              "start_date": "2026-02-03",
+              "end_date": "2026-02-15",
+              "source": "https://liquipedia.net/dota2/BLAST/Slam/6"
+            },
+            {
+              "league_id": 19269,
+              "name": "DreamLeague Season 28",
+              "start_date": "2026-02-16",
+              "end_date": "2026-03-01",
+              "source": "https://liquipedia.net/dota2/DreamLeague/28",
+              "classification_source": "https://liquipedia.net/dota2/Nightfall/Results"
+            },
+            {
+              "league_id": 19435,
+              "name": "PGL Wallachia Season 7",
+              "start_date": "2026-03-07",
+              "end_date": "2026-03-15",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/7"
+            },
+            {
+              "league_id": 19422,
+              "name": "ESL One Birmingham 2026",
+              "start_date": "2026-03-22",
+              "end_date": "2026-03-29",
+              "source": "https://liquipedia.net/dota2/ESL_One/Birmingham/2026",
+              "classification_source": "https://liquipedia.net/dota2/Totus/Broadcasts"
+            },
+            {
+              "league_id": 19543,
+              "name": "PGL Wallachia Season 8",
+              "start_date": "2026-04-18",
+              "end_date": "2026-04-26",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/8"
+            },
+            {
+              "league_id": 19696,
+              "name": "DreamLeague Season 29",
+              "start_date": "2026-05-13",
+              "end_date": "2026-05-24",
+              "source": "https://liquipedia.net/dota2/DreamLeague/29"
+            },
+            {
+              "league_id": 19101,
+              "name": "BLAST SLAM VII",
+              "start_date": "2026-05-26",
+              "end_date": "2026-06-07",
+              "source": "https://liquipedia.net/dota2/BLAST/SLAM/7",
+              "classification_source": "https://liquipedia.net/dota2/Totus/Broadcasts"
+            }
+          ],
+          "notes": [
+            "Qualifiers and Division 2 events excluded",
+            "IDs checked against the local Steam league catalog and match date ranges",
+            "Only the verified list is weighted or scored; other Tier 1 events may be absent from the list"
+          ]
+        },
+        "training_scope": {
+          "tier": 1,
+          "classification": "Verified subset of Liquipedia Tier 1 main events; not an exhaustive list",
+          "verified_at": "2026-10-11",
+          "events": [
+            {
+              "league_id": 18920,
+              "name": "PGL Wallachia Season 6",
+              "start_date": "2025-11-15",
+              "end_date": "2025-11-23",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/6",
+              "classification_source": "https://liquipedia.net/dota2/ODPixel/Broadcasts"
+            },
+            {
+              "league_id": 17420,
+              "name": "BLAST SLAM V",
+              "start_date": "2025-11-25",
+              "end_date": "2025-12-07",
+              "source": "https://liquipedia.net/dota2/BLAST/SLAM/5"
+            },
+            {
+              "league_id": 18988,
+              "name": "DreamLeague Season 27",
+              "start_date": "2025-12-10",
+              "end_date": "2025-12-21",
+              "source": "https://liquipedia.net/dota2/DreamLeague/27",
+              "classification_source": "https://liquipedia.net/dota2/ODPixel/Broadcasts"
+            },
+            {
+              "league_id": 19099,
+              "name": "BLAST SLAM VI",
+              "start_date": "2026-02-03",
+              "end_date": "2026-02-15",
+              "source": "https://liquipedia.net/dota2/BLAST/Slam/6"
+            },
+            {
+              "league_id": 19269,
+              "name": "DreamLeague Season 28",
+              "start_date": "2026-02-16",
+              "end_date": "2026-03-01",
+              "source": "https://liquipedia.net/dota2/DreamLeague/28",
+              "classification_source": "https://liquipedia.net/dota2/Nightfall/Results"
+            },
+            {
+              "league_id": 19435,
+              "name": "PGL Wallachia Season 7",
+              "start_date": "2026-03-07",
+              "end_date": "2026-03-15",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/7"
+            },
+            {
+              "league_id": 19422,
+              "name": "ESL One Birmingham 2026",
+              "start_date": "2026-03-22",
+              "end_date": "2026-03-29",
+              "source": "https://liquipedia.net/dota2/ESL_One/Birmingham/2026",
+              "classification_source": "https://liquipedia.net/dota2/Totus/Broadcasts"
+            },
+            {
+              "league_id": 19543,
+              "name": "PGL Wallachia Season 8",
+              "start_date": "2026-04-18",
+              "end_date": "2026-04-26",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/8"
+            },
+            {
+              "league_id": 19696,
+              "name": "DreamLeague Season 29",
+              "start_date": "2026-05-13",
+              "end_date": "2026-05-24",
+              "source": "https://liquipedia.net/dota2/DreamLeague/29"
+            },
+            {
+              "league_id": 19101,
+              "name": "BLAST SLAM VII",
+              "start_date": "2026-05-26",
+              "end_date": "2026-06-07",
+              "source": "https://liquipedia.net/dota2/BLAST/SLAM/7",
+              "classification_source": "https://liquipedia.net/dota2/Totus/Broadcasts"
+            }
+          ],
+          "notes": [
+            "Qualifiers and Division 2 events excluded",
+            "IDs checked against the local Steam league catalog and match date ranges",
+            "Only the verified list is weighted or scored; other Tier 1 events may be absent from the list"
+          ]
+        },
+        "holdout_already_examined_in_previous_work": true
+      },
+      "results": {
+        "plan": "round-3-tier1-domain-2026-10-11",
+        "development": {
+          "baseline": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 192,
+              "accuracy": 0.6037735849056604,
+              "brier": 0.23212391640528704,
+              "log_loss": 0.6566910608469914,
+              "training_maps": 7641,
+              "calibration_maps": 2527
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 205,
+              "accuracy": 0.5774647887323944,
+              "brier": 0.2391766527598768,
+              "log_loss": 0.6705691602172391,
+              "training_maps": 10923,
+              "calibration_maps": 3630
+            }
+          ],
+          "tier1_calibration": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 186,
+              "accuracy": 0.5849056603773585,
+              "brier": 0.23471686193118346,
+              "log_loss": 0.6619546735621104,
+              "training_maps": 7641,
+              "calibration_maps": 212
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 200,
+              "accuracy": 0.5633802816901409,
+              "brier": 0.24056849903137595,
+              "log_loss": 0.6732697169738844,
+              "training_maps": 10923,
+              "calibration_maps": 312
+            }
+          ],
+          "tier1_weight_4": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 188,
+              "accuracy": 0.5911949685534591,
+              "brier": 0.23167505235376848,
+              "log_loss": 0.655775842511279,
+              "training_maps": 7641,
+              "calibration_maps": 2527
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 202,
+              "accuracy": 0.5690140845070423,
+              "brier": 0.23963975848173055,
+              "log_loss": 0.6716887844444503,
+              "training_maps": 10923,
+              "calibration_maps": 3630
+            }
+          ],
+          "tier1_weight_12_calibrated": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 183,
+              "accuracy": 0.5754716981132075,
+              "brier": 0.23692600860359228,
+              "log_loss": 0.6675608202311725,
+              "training_maps": 7641,
+              "calibration_maps": 212
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 202,
+              "accuracy": 0.5690140845070423,
+              "brier": 0.2407551756199676,
+              "log_loss": 0.6741768361534076,
+              "training_maps": 10923,
+              "calibration_maps": 312
+            }
+          ],
+          "tier1_only": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 192,
+              "accuracy": 0.6037735849056604,
+              "brier": 0.23194172581345934,
+              "log_loss": 0.655930242042814,
+              "training_maps": 416,
+              "calibration_maps": 212
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 206,
+              "accuracy": 0.5802816901408451,
+              "brier": 0.23938207989005997,
+              "log_loss": 0.670880968795627,
+              "training_maps": 706,
+              "calibration_maps": 312
+            }
+          ],
+          "tier1_role_interactions": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 185,
+              "accuracy": 0.5817610062893082,
+              "brier": 0.234724396232332,
+              "log_loss": 0.6620645136915769,
+              "training_maps": 7641,
+              "calibration_maps": 212
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 203,
+              "accuracy": 0.571830985915493,
+              "brier": 0.2424453352410177,
+              "log_loss": 0.6778076341258114,
+              "training_maps": 10923,
+              "calibration_maps": 312
+            }
+          ],
+          "tier1_nonlinear": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 197,
+              "accuracy": 0.6194968553459119,
+              "brier": 0.2298723575203346,
+              "log_loss": 0.6521887134269048,
+              "training_maps": 7641,
+              "calibration_maps": 212
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 207,
+              "accuracy": 0.5830985915492958,
+              "brier": 0.2376382951931807,
+              "log_loss": 0.6669514395864345,
+              "training_maps": 10923,
+              "calibration_maps": 312
+            }
+          ]
+        },
+        "selected_candidate": "tier1_nonlinear",
+        "tier1": {
+          "baseline": {
+            "count": 442,
+            "wins": 285,
+            "accuracy": 0.6447963800904978,
+            "brier": 0.22342395642918006,
+            "log_loss": 0.6379755587749459
+          },
+          "candidate": {
+            "count": 442,
+            "wins": 284,
+            "accuracy": 0.6425339366515838,
+            "brier": 0.21914730868650778,
+            "log_loss": 0.6283764762771498
+          },
+          "series_blocks": 200,
+          "brier_difference_95_interval": [
+            -0.0094677020311855,
+            0.0009752605137246391
+          ],
+          "accuracy_difference_95_interval": [
+            -0.03829261954261954,
+            0.03363417644984129
+          ],
+          "established_baseline": {
+            "count": 442,
+            "wins": 285,
+            "accuracy": 0.6447963800904978,
+            "brier": 0.22342395642918006,
+            "elo_accuracy": 0.6380090497737556,
+            "elo_brier": 0.22540335116259927
+          },
+          "full_coverage": true,
+          "by_league": [
+            {
+              "league_id": 19102,
+              "baseline": {
+                "count": 79,
+                "wins": 50,
+                "accuracy": 0.6329113924050633,
+                "brier": 0.22485103129526005,
+                "log_loss": 0.6407680895239011
+              },
+              "candidate": {
+                "count": 79,
+                "wins": 47,
+                "accuracy": 0.5949367088607594,
+                "brier": 0.22825275806386894,
+                "log_loss": 0.6474957285121075
+              }
+            },
+            {
+              "league_id": 19719,
+              "baseline": {
+                "count": 147,
+                "wins": 91,
+                "accuracy": 0.6190476190476191,
+                "brier": 0.23137978675335177,
+                "log_loss": 0.6549450972572166
+              },
+              "candidate": {
+                "count": 147,
+                "wins": 87,
+                "accuracy": 0.5918367346938775,
+                "brier": 0.23080934582666968,
+                "log_loss": 0.6530453008579927
+              }
+            },
+            {
+              "league_id": 19785,
+              "baseline": {
+                "count": 156,
+                "wins": 108,
+                "accuracy": 0.6923076923076923,
+                "brier": 0.2070357168418876,
+                "log_loss": 0.6035906495306855
+              },
+              "candidate": {
+                "count": 156,
+                "wins": 115,
+                "accuracy": 0.7371794871794872,
+                "brier": 0.19509801539574637,
+                "log_loss": 0.5776759722973077
+              }
+            },
+            {
+              "league_id": 20009,
+              "baseline": {
+                "count": 60,
+                "wins": 36,
+                "accuracy": 0.6,
+                "brier": 0.24466261315491442,
+                "log_loss": 0.682124121375669
+              },
+              "candidate": {
+                "count": 60,
+                "wins": 35,
+                "accuracy": 0.5833333333333334,
+                "brier": 0.24111463856889867,
+                "log_loss": 0.6745854842923131
+              }
+            }
+          ]
+        },
+        "promotion_recommended": false,
+        "promoted": false
+      }
+    },
+    {
+      "title": "Прямые контрпики и связки",
+      "directory": "model-research-counters-2026-10-11",
+      "plan_path": "model-experiments-counters-2026-10-11.json",
+      "preregistration_commit": "2ba8c4d",
+      "protocol": {
+        "plan": {
+          "schema": 1,
+          "name": "round-4-direct-counters-2026-10-11",
+          "seed": 42,
+          "primary_metric": "brier",
+          "development_prefixes": [
+            0.7,
+            1.0
+          ],
+          "development_scope_path": "tier1-training-2025-2026.json",
+          "training_scope_path": "tier1-training-2025-2026.json",
+          "minimum_brier_improvement": 0.0005,
+          "selection": "Fixed earlier Tier 1 folds; no Brier regression in either fold, no aggregate accuracy regression; then lowest mean Brier",
+          "promotion": "No automatic promotion; future independent evaluation required",
+          "candidates": [
+            {
+              "name": "baseline",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "hypothesis": "Original control reproduced on the same map IDs and probabilities"
+            },
+            {
+              "name": "direct_counters",
+              "kind": "linear",
+              "features": "counters",
+              "C": 0.15,
+              "hypothesis": "Learn individual cross-team hero matchup coefficients alongside ratings, rather than a mean counter statistic"
+            },
+            {
+              "name": "direct_counters_shrunk",
+              "kind": "linear",
+              "features": "counters",
+              "C": 0.05,
+              "hypothesis": "Learn direct matchups with stronger shrinkage of sparsely observed hero pairs"
+            },
+            {
+              "name": "role_counters_and_lanes",
+              "kind": "linear",
+              "features": "role_counters",
+              "C": 0.15,
+              "hypothesis": "Add directed mid matchups and core-support hero pairs only when past roles are known"
+            },
+            {
+              "name": "role_counters_tier_weighted",
+              "kind": "linear",
+              "features": "role_counters",
+              "C": 0.05,
+              "tier_multiplier": 4,
+              "hypothesis": "Learn concrete matchups and lane pairs with top-level maps weighted more heavily"
+            },
+            {
+              "name": "fixed_global_target_blend",
+              "kind": "blend",
+              "blend_weights": [
+                0.5,
+                0.5
+              ],
+              "members": [
+                {
+                  "kind": "linear",
+                  "features": "classic",
+                  "C": 0.15
+                },
+                {
+                  "kind": "hist_gradient",
+                  "features": "compact",
+                  "tier_multiplier": 4,
+                  "target_calibration": true,
+                  "max_depth": 3,
+                  "max_leaf_nodes": 8,
+                  "min_samples_leaf": 80,
+                  "max_iter": 150
+                }
+              ],
+              "hypothesis": "A predeclared 50/50 average may reduce nonlinear variance without tuning to four-month outcomes"
+            }
+          ],
+          "excluded_previous_ideas": [
+            "No repeats of the unweighted deeper tree",
+            "No search over blend weights",
+            "No selection using June-October outcomes"
+          ],
+          "guardrails": [
+            "Heroes and old roles only; no current lane measurements",
+            "Unknown roles produce no mid or lane pair assumption",
+            "Same baseline probabilities and full 442-map coverage asserted",
+            "Preserve all failed experiments and immutable forecasts"
+          ]
+        },
+        "plan_sha256": "2acee2209b782ebefcc5f11e351e24da42bde05b79b8a3693b4f6507e7151e19",
+        "implementation_sha256": "c37626f5fff014b9ebf6d0cf4ea2fd24a70b7a3bc2a2d29e96dc7ca0e4467dbb",
+        "data_sha256": "2144fb0760ae25d7701fbb1483a87f9305760c74076097ac2a889cfb330ce13e",
+        "history_maps_before_period": 18231,
+        "requested_start": "2026-06-10T00:00:00+03:00",
+        "requested_end": "2026-10-10T18:53:18.481928+03:00",
+        "heldout_scope": {
+          "tier": 1,
+          "classification": "Liquipedia Tier 1, verified 2026-10-10",
+          "source": "https://liquipedia.net/dota2/Tier_1_Tournaments",
+          "events": [
+            {
+              "league_id": 19785,
+              "name": "Esports World Cup 2026",
+              "start_date": "2026-07-07",
+              "end_date": "2026-07-19",
+              "source": "https://liquipedia.net/dota2/Tier_1_Tournaments"
+            },
+            {
+              "league_id": 20009,
+              "name": "1win Essence II",
+              "start_date": "2026-07-30",
+              "end_date": "2026-08-05",
+              "source": "https://liquipedia.net/dota2/Tier_1_Tournaments"
+            },
+            {
+              "league_id": 19719,
+              "name": "The International 2026",
+              "start_date": "2026-08-13",
+              "end_date": "2026-08-23",
+              "source": "https://liquipedia.net/dota2/The_International/2026"
+            },
+            {
+              "league_id": 19102,
+              "name": "BLAST SLAM VIII",
+              "start_date": "2026-09-29",
+              "end_date": "2026-10-11",
+              "source": "https://liquipedia.net/dota2/BLAST/Slam/8"
+            }
+          ],
+          "excluded": [
+            {
+              "league_id": 20279,
+              "name": "PGL Wallachia Season 9",
+              "reason": "Liquipedia identifies this edition as Tier 2",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/9"
+            },
+            {
+              "league_id": 19917,
+              "name": "Games of the Future 2026",
+              "reason": "Liquipedia Tier 2",
+              "source": "https://liquipedia.net/dota2/Recent_Tournament_Results"
+            }
+          ],
+          "notes": [
+            "Main events only: regional and open qualifiers are separate leagues and excluded",
+            "Event dates are checked in addition to league IDs to protect against IDs reused between seasons",
+            "BLAST SLAM VIII is still in progress at the end of the evaluation window",
+            "OpenDota premium is not used as a synonym for Liquipedia Tier 1"
+          ]
+        },
+        "development_scope": {
+          "tier": 1,
+          "classification": "Verified subset of Liquipedia Tier 1 main events; not an exhaustive list",
+          "verified_at": "2026-10-11",
+          "events": [
+            {
+              "league_id": 18920,
+              "name": "PGL Wallachia Season 6",
+              "start_date": "2025-11-15",
+              "end_date": "2025-11-23",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/6",
+              "classification_source": "https://liquipedia.net/dota2/ODPixel/Broadcasts"
+            },
+            {
+              "league_id": 17420,
+              "name": "BLAST SLAM V",
+              "start_date": "2025-11-25",
+              "end_date": "2025-12-07",
+              "source": "https://liquipedia.net/dota2/BLAST/SLAM/5"
+            },
+            {
+              "league_id": 18988,
+              "name": "DreamLeague Season 27",
+              "start_date": "2025-12-10",
+              "end_date": "2025-12-21",
+              "source": "https://liquipedia.net/dota2/DreamLeague/27",
+              "classification_source": "https://liquipedia.net/dota2/ODPixel/Broadcasts"
+            },
+            {
+              "league_id": 19099,
+              "name": "BLAST SLAM VI",
+              "start_date": "2026-02-03",
+              "end_date": "2026-02-15",
+              "source": "https://liquipedia.net/dota2/BLAST/Slam/6"
+            },
+            {
+              "league_id": 19269,
+              "name": "DreamLeague Season 28",
+              "start_date": "2026-02-16",
+              "end_date": "2026-03-01",
+              "source": "https://liquipedia.net/dota2/DreamLeague/28",
+              "classification_source": "https://liquipedia.net/dota2/Nightfall/Results"
+            },
+            {
+              "league_id": 19435,
+              "name": "PGL Wallachia Season 7",
+              "start_date": "2026-03-07",
+              "end_date": "2026-03-15",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/7"
+            },
+            {
+              "league_id": 19422,
+              "name": "ESL One Birmingham 2026",
+              "start_date": "2026-03-22",
+              "end_date": "2026-03-29",
+              "source": "https://liquipedia.net/dota2/ESL_One/Birmingham/2026",
+              "classification_source": "https://liquipedia.net/dota2/Totus/Broadcasts"
+            },
+            {
+              "league_id": 19543,
+              "name": "PGL Wallachia Season 8",
+              "start_date": "2026-04-18",
+              "end_date": "2026-04-26",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/8"
+            },
+            {
+              "league_id": 19696,
+              "name": "DreamLeague Season 29",
+              "start_date": "2026-05-13",
+              "end_date": "2026-05-24",
+              "source": "https://liquipedia.net/dota2/DreamLeague/29"
+            },
+            {
+              "league_id": 19101,
+              "name": "BLAST SLAM VII",
+              "start_date": "2026-05-26",
+              "end_date": "2026-06-07",
+              "source": "https://liquipedia.net/dota2/BLAST/SLAM/7",
+              "classification_source": "https://liquipedia.net/dota2/Totus/Broadcasts"
+            }
+          ],
+          "notes": [
+            "Qualifiers and Division 2 events excluded",
+            "IDs checked against the local Steam league catalog and match date ranges",
+            "Only the verified list is weighted or scored; other Tier 1 events may be absent from the list"
+          ]
+        },
+        "training_scope": {
+          "tier": 1,
+          "classification": "Verified subset of Liquipedia Tier 1 main events; not an exhaustive list",
+          "verified_at": "2026-10-11",
+          "events": [
+            {
+              "league_id": 18920,
+              "name": "PGL Wallachia Season 6",
+              "start_date": "2025-11-15",
+              "end_date": "2025-11-23",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/6",
+              "classification_source": "https://liquipedia.net/dota2/ODPixel/Broadcasts"
+            },
+            {
+              "league_id": 17420,
+              "name": "BLAST SLAM V",
+              "start_date": "2025-11-25",
+              "end_date": "2025-12-07",
+              "source": "https://liquipedia.net/dota2/BLAST/SLAM/5"
+            },
+            {
+              "league_id": 18988,
+              "name": "DreamLeague Season 27",
+              "start_date": "2025-12-10",
+              "end_date": "2025-12-21",
+              "source": "https://liquipedia.net/dota2/DreamLeague/27",
+              "classification_source": "https://liquipedia.net/dota2/ODPixel/Broadcasts"
+            },
+            {
+              "league_id": 19099,
+              "name": "BLAST SLAM VI",
+              "start_date": "2026-02-03",
+              "end_date": "2026-02-15",
+              "source": "https://liquipedia.net/dota2/BLAST/Slam/6"
+            },
+            {
+              "league_id": 19269,
+              "name": "DreamLeague Season 28",
+              "start_date": "2026-02-16",
+              "end_date": "2026-03-01",
+              "source": "https://liquipedia.net/dota2/DreamLeague/28",
+              "classification_source": "https://liquipedia.net/dota2/Nightfall/Results"
+            },
+            {
+              "league_id": 19435,
+              "name": "PGL Wallachia Season 7",
+              "start_date": "2026-03-07",
+              "end_date": "2026-03-15",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/7"
+            },
+            {
+              "league_id": 19422,
+              "name": "ESL One Birmingham 2026",
+              "start_date": "2026-03-22",
+              "end_date": "2026-03-29",
+              "source": "https://liquipedia.net/dota2/ESL_One/Birmingham/2026",
+              "classification_source": "https://liquipedia.net/dota2/Totus/Broadcasts"
+            },
+            {
+              "league_id": 19543,
+              "name": "PGL Wallachia Season 8",
+              "start_date": "2026-04-18",
+              "end_date": "2026-04-26",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/8"
+            },
+            {
+              "league_id": 19696,
+              "name": "DreamLeague Season 29",
+              "start_date": "2026-05-13",
+              "end_date": "2026-05-24",
+              "source": "https://liquipedia.net/dota2/DreamLeague/29"
+            },
+            {
+              "league_id": 19101,
+              "name": "BLAST SLAM VII",
+              "start_date": "2026-05-26",
+              "end_date": "2026-06-07",
+              "source": "https://liquipedia.net/dota2/BLAST/SLAM/7",
+              "classification_source": "https://liquipedia.net/dota2/Totus/Broadcasts"
+            }
+          ],
+          "notes": [
+            "Qualifiers and Division 2 events excluded",
+            "IDs checked against the local Steam league catalog and match date ranges",
+            "Only the verified list is weighted or scored; other Tier 1 events may be absent from the list"
+          ]
+        },
+        "holdout_already_examined_in_previous_work": true
+      },
+      "results": {
+        "plan": "round-4-direct-counters-2026-10-11",
+        "development": {
+          "baseline": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 192,
+              "accuracy": 0.6037735849056604,
+              "brier": 0.23212391640528704,
+              "log_loss": 0.6566910608469914,
+              "training_maps": 7641,
+              "calibration_maps": 2527
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 205,
+              "accuracy": 0.5774647887323944,
+              "brier": 0.2391766527598768,
+              "log_loss": 0.6705691602172391,
+              "training_maps": 10923,
+              "calibration_maps": 3630
+            }
+          ],
+          "direct_counters": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 192,
+              "accuracy": 0.6037735849056604,
+              "brier": 0.23245655159734938,
+              "log_loss": 0.65736492683522,
+              "training_maps": 7641,
+              "calibration_maps": 2527
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 204,
+              "accuracy": 0.5746478873239437,
+              "brier": 0.23948169837135785,
+              "log_loss": 0.6712204919048766,
+              "training_maps": 10923,
+              "calibration_maps": 3630
+            }
+          ],
+          "direct_counters_shrunk": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 195,
+              "accuracy": 0.6132075471698113,
+              "brier": 0.23306567506130096,
+              "log_loss": 0.6584978831291565,
+              "training_maps": 7641,
+              "calibration_maps": 2527
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 199,
+              "accuracy": 0.5605633802816902,
+              "brier": 0.23881843330841707,
+              "log_loss": 0.669828259651072,
+              "training_maps": 10923,
+              "calibration_maps": 3630
+            }
+          ],
+          "role_counters_and_lanes": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 193,
+              "accuracy": 0.6069182389937107,
+              "brier": 0.23278657024245247,
+              "log_loss": 0.6580158876697151,
+              "training_maps": 7641,
+              "calibration_maps": 2527
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 202,
+              "accuracy": 0.5690140845070423,
+              "brier": 0.23966590502490737,
+              "log_loss": 0.6715624661852051,
+              "training_maps": 10923,
+              "calibration_maps": 3630
+            }
+          ],
+          "role_counters_tier_weighted": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 189,
+              "accuracy": 0.5943396226415094,
+              "brier": 0.23239325134892494,
+              "log_loss": 0.6571750799306774,
+              "training_maps": 7641,
+              "calibration_maps": 2527
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 204,
+              "accuracy": 0.5746478873239437,
+              "brier": 0.23936099137362943,
+              "log_loss": 0.6710618469211557,
+              "training_maps": 10923,
+              "calibration_maps": 3630
+            }
+          ],
+          "fixed_global_target_blend": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 190,
+              "accuracy": 0.5974842767295597,
+              "brier": 0.2292532064351731,
+              "log_loss": 0.6505545064813434,
+              "training_maps": 7641,
+              "calibration_maps": 2527
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 204,
+              "accuracy": 0.5746478873239437,
+              "brier": 0.2376511758959851,
+              "log_loss": 0.6671403066733413,
+              "training_maps": 10923,
+              "calibration_maps": 3630
+            }
+          ]
+        },
+        "selected_candidate": null,
+        "tier1": null,
+        "promotion_recommended": false,
+        "promoted": false
+      }
+    },
+    {
+      "title": "Свежие веса и переобучение",
+      "directory": "model-research-freshness-2026-10-11",
+      "plan_path": "model-experiments-freshness-2026-10-11.json",
+      "preregistration_commit": "a822c46",
+      "protocol": {
+        "plan": {
+          "schema": 1,
+          "name": "round-5-fresh-weights-2026-10-11",
+          "seed": 42,
+          "primary_metric": "brier",
+          "development_prefixes": [
+            0.7,
+            1.0
+          ],
+          "development_scope_path": "tier1-training-2025-2026.json",
+          "minimum_brier_improvement": 0.0005,
+          "selection": "Same earlier Tier 1 folds, no Brier regression in either and no aggregate accuracy regression, lowest mean Brier",
+          "promotion": "No automatic promotion; retain the current live model unless a separate future test confirms improvement",
+          "candidates": [
+            {
+              "name": "baseline",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "hypothesis": "Control with frozen model weights and causal online ratings"
+            },
+            {
+              "name": "more_recent_weights_70",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "earlier_training_fraction": 0.875,
+              "hypothesis": "Use 70% for fitting and 10% for calibration instead of 60% and 20%, preserving the last 20% test"
+            },
+            {
+              "name": "more_recent_weights_75",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "earlier_training_fraction": 0.9375,
+              "hypothesis": "Use 75% for fitting and 5% for calibration so hero weights reflect more recent maps"
+            },
+            {
+              "name": "rolling_training_90_days",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "earlier_training_fraction": 0.875,
+              "training_days": 90,
+              "hypothesis": "Discard older training examples, while retaining all causal history for player and team ratings"
+            },
+            {
+              "name": "monthly_refit_80",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "monthly_update": true,
+              "monthly_training_fraction": 0.8,
+              "hypothesis": "Refresh weights at each following month boundary using only results available then, with an 80/20 past-data training/calibration split"
+            },
+            {
+              "name": "monthly_refit_90",
+              "kind": "linear",
+              "features": "classic",
+              "C": 0.15,
+              "monthly_update": true,
+              "monthly_training_fraction": 0.9,
+              "hypothesis": "Monthly updates using a larger and fresher training portion and a smaller calibration portion"
+            }
+          ],
+          "excluded_previous_ideas": [
+            "No further counter coefficient retuning",
+            "No tuning dates, windows or blend weights using four-month outcomes"
+          ],
+          "guardrails": [
+            "Current-map outcome never enters fitting",
+            "At monthly updates, labels must be available before month start including a 60-second completion buffer",
+            "Purge series crossing training/calibration boundaries",
+            "Keep earlier development-test maps separate for static models",
+            "Walk-forward models may learn only already completed earlier test maps, as a real deployment would",
+            "No change to full 442-map coverage"
+          ]
+        },
+        "plan_sha256": "4084fbfd38f167b7b68a24ecf6bfe552fb2ad2f44952d5fbf9065eaa00414a4c",
+        "implementation_sha256": "8facc0b7fa4af90f596b164a061b2551105468be7966cf108ab833d3bc1bdd82",
+        "data_sha256": "2144fb0760ae25d7701fbb1483a87f9305760c74076097ac2a889cfb330ce13e",
+        "history_maps_before_period": 18231,
+        "requested_start": "2026-06-10T00:00:00+03:00",
+        "requested_end": "2026-10-10T18:53:18.481928+03:00",
+        "heldout_scope": {
+          "tier": 1,
+          "classification": "Liquipedia Tier 1, verified 2026-10-10",
+          "source": "https://liquipedia.net/dota2/Tier_1_Tournaments",
+          "events": [
+            {
+              "league_id": 19785,
+              "name": "Esports World Cup 2026",
+              "start_date": "2026-07-07",
+              "end_date": "2026-07-19",
+              "source": "https://liquipedia.net/dota2/Tier_1_Tournaments"
+            },
+            {
+              "league_id": 20009,
+              "name": "1win Essence II",
+              "start_date": "2026-07-30",
+              "end_date": "2026-08-05",
+              "source": "https://liquipedia.net/dota2/Tier_1_Tournaments"
+            },
+            {
+              "league_id": 19719,
+              "name": "The International 2026",
+              "start_date": "2026-08-13",
+              "end_date": "2026-08-23",
+              "source": "https://liquipedia.net/dota2/The_International/2026"
+            },
+            {
+              "league_id": 19102,
+              "name": "BLAST SLAM VIII",
+              "start_date": "2026-09-29",
+              "end_date": "2026-10-11",
+              "source": "https://liquipedia.net/dota2/BLAST/Slam/8"
+            }
+          ],
+          "excluded": [
+            {
+              "league_id": 20279,
+              "name": "PGL Wallachia Season 9",
+              "reason": "Liquipedia identifies this edition as Tier 2",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/9"
+            },
+            {
+              "league_id": 19917,
+              "name": "Games of the Future 2026",
+              "reason": "Liquipedia Tier 2",
+              "source": "https://liquipedia.net/dota2/Recent_Tournament_Results"
+            }
+          ],
+          "notes": [
+            "Main events only: regional and open qualifiers are separate leagues and excluded",
+            "Event dates are checked in addition to league IDs to protect against IDs reused between seasons",
+            "BLAST SLAM VIII is still in progress at the end of the evaluation window",
+            "OpenDota premium is not used as a synonym for Liquipedia Tier 1"
+          ]
+        },
+        "development_scope": {
+          "tier": 1,
+          "classification": "Verified subset of Liquipedia Tier 1 main events; not an exhaustive list",
+          "verified_at": "2026-10-11",
+          "events": [
+            {
+              "league_id": 18920,
+              "name": "PGL Wallachia Season 6",
+              "start_date": "2025-11-15",
+              "end_date": "2025-11-23",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/6",
+              "classification_source": "https://liquipedia.net/dota2/ODPixel/Broadcasts"
+            },
+            {
+              "league_id": 17420,
+              "name": "BLAST SLAM V",
+              "start_date": "2025-11-25",
+              "end_date": "2025-12-07",
+              "source": "https://liquipedia.net/dota2/BLAST/SLAM/5"
+            },
+            {
+              "league_id": 18988,
+              "name": "DreamLeague Season 27",
+              "start_date": "2025-12-10",
+              "end_date": "2025-12-21",
+              "source": "https://liquipedia.net/dota2/DreamLeague/27",
+              "classification_source": "https://liquipedia.net/dota2/ODPixel/Broadcasts"
+            },
+            {
+              "league_id": 19099,
+              "name": "BLAST SLAM VI",
+              "start_date": "2026-02-03",
+              "end_date": "2026-02-15",
+              "source": "https://liquipedia.net/dota2/BLAST/Slam/6"
+            },
+            {
+              "league_id": 19269,
+              "name": "DreamLeague Season 28",
+              "start_date": "2026-02-16",
+              "end_date": "2026-03-01",
+              "source": "https://liquipedia.net/dota2/DreamLeague/28",
+              "classification_source": "https://liquipedia.net/dota2/Nightfall/Results"
+            },
+            {
+              "league_id": 19435,
+              "name": "PGL Wallachia Season 7",
+              "start_date": "2026-03-07",
+              "end_date": "2026-03-15",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/7"
+            },
+            {
+              "league_id": 19422,
+              "name": "ESL One Birmingham 2026",
+              "start_date": "2026-03-22",
+              "end_date": "2026-03-29",
+              "source": "https://liquipedia.net/dota2/ESL_One/Birmingham/2026",
+              "classification_source": "https://liquipedia.net/dota2/Totus/Broadcasts"
+            },
+            {
+              "league_id": 19543,
+              "name": "PGL Wallachia Season 8",
+              "start_date": "2026-04-18",
+              "end_date": "2026-04-26",
+              "source": "https://liquipedia.net/dota2/PGL/Wallachia/8"
+            },
+            {
+              "league_id": 19696,
+              "name": "DreamLeague Season 29",
+              "start_date": "2026-05-13",
+              "end_date": "2026-05-24",
+              "source": "https://liquipedia.net/dota2/DreamLeague/29"
+            },
+            {
+              "league_id": 19101,
+              "name": "BLAST SLAM VII",
+              "start_date": "2026-05-26",
+              "end_date": "2026-06-07",
+              "source": "https://liquipedia.net/dota2/BLAST/SLAM/7",
+              "classification_source": "https://liquipedia.net/dota2/Totus/Broadcasts"
+            }
+          ],
+          "notes": [
+            "Qualifiers and Division 2 events excluded",
+            "IDs checked against the local Steam league catalog and match date ranges",
+            "Only the verified list is weighted or scored; other Tier 1 events may be absent from the list"
+          ]
+        },
+        "training_scope": null,
+        "holdout_already_examined_in_previous_work": true
+      },
+      "results": {
+        "plan": "round-5-fresh-weights-2026-10-11",
+        "development": {
+          "baseline": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 192,
+              "accuracy": 0.6037735849056604,
+              "brier": 0.23212391640528704,
+              "log_loss": 0.6566910608469914,
+              "training_maps": 7641,
+              "calibration_maps": 2527
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 205,
+              "accuracy": 0.5774647887323944,
+              "brier": 0.2391766527598768,
+              "log_loss": 0.6705691602172391,
+              "training_maps": 10923,
+              "calibration_maps": 3630
+            }
+          ],
+          "more_recent_weights_70": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 188,
+              "accuracy": 0.5911949685534591,
+              "brier": 0.23037468907679262,
+              "log_loss": 0.652925191114359,
+              "training_maps": 8888,
+              "calibration_maps": 1266
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 206,
+              "accuracy": 0.5802816901408451,
+              "brier": 0.23974525571021163,
+              "log_loss": 0.6718509940581902,
+              "training_maps": 12725,
+              "calibration_maps": 1816
+            }
+          ],
+          "more_recent_weights_75": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 195,
+              "accuracy": 0.6132075471698113,
+              "brier": 0.22928348216380057,
+              "log_loss": 0.6505777361703777,
+              "training_maps": 9523,
+              "calibration_maps": 626
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 210,
+              "accuracy": 0.5915492957746479,
+              "brier": 0.23927078819544928,
+              "log_loss": 0.670845221763646,
+              "training_maps": 13632,
+              "calibration_maps": 902
+            }
+          ],
+          "rolling_training_90_days": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 191,
+              "accuracy": 0.60062893081761,
+              "brier": 0.23002445983453598,
+              "log_loss": 0.6521188297168767,
+              "training_maps": 6508,
+              "calibration_maps": 1266
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 209,
+              "accuracy": 0.5887323943661972,
+              "brier": 0.2388479852770729,
+              "log_loss": 0.669986106961469,
+              "training_maps": 6656,
+              "calibration_maps": 1816
+            }
+          ],
+          "monthly_refit_80": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 196,
+              "accuracy": 0.6163522012578616,
+              "brier": 0.23122578167753033,
+              "log_loss": 0.6547403475783977,
+              "training_maps": 7641,
+              "calibration_maps": 2527
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 205,
+              "accuracy": 0.5774647887323944,
+              "brier": 0.23845421489018057,
+              "log_loss": 0.6688908985798201,
+              "training_maps": 10923,
+              "calibration_maps": 3630
+            }
+          ],
+          "monthly_refit_90": [
+            {
+              "fold": 0,
+              "test_start": 1771693740,
+              "test_end": 1774550940,
+              "count": 318,
+              "wins": 200,
+              "accuracy": 0.6289308176100629,
+              "brier": 0.2305166467761637,
+              "log_loss": 0.6533149760438067,
+              "training_maps": 7641,
+              "calibration_maps": 2527
+            },
+            {
+              "fold": 1,
+              "test_start": 1776685722,
+              "test_end": 1780857145,
+              "count": 355,
+              "wins": 205,
+              "accuracy": 0.5774647887323944,
+              "brier": 0.23953578352853666,
+              "log_loss": 0.6713500283181519,
+              "training_maps": 10923,
+              "calibration_maps": 3630
+            }
+          ]
+        },
+        "selected_candidate": "rolling_training_90_days",
+        "tier1": {
+          "baseline": {
+            "count": 442,
+            "wins": 285,
+            "accuracy": 0.6447963800904978,
+            "brier": 0.22342395642918006,
+            "log_loss": 0.6379755587749459
+          },
+          "candidate": {
+            "count": 442,
+            "wins": 274,
+            "accuracy": 0.6199095022624435,
+            "brier": 0.2250888267781098,
+            "log_loss": 0.6410680152465352
+          },
+          "series_blocks": 200,
+          "brier_difference_95_interval": [
+            -0.001637814305545984,
+            0.005040215169577458
+          ],
+          "accuracy_difference_95_interval": [
+            -0.05455168119551681,
+            0.0023149490848156746
+          ],
+          "established_baseline": {
+            "count": 442,
+            "wins": 285,
+            "accuracy": 0.6447963800904978,
+            "brier": 0.22342395642918006,
+            "elo_accuracy": 0.6380090497737556,
+            "elo_brier": 0.22540335116259927
+          },
+          "full_coverage": true,
+          "by_league": [
+            {
+              "league_id": 19102,
+              "baseline": {
+                "count": 79,
+                "wins": 50,
+                "accuracy": 0.6329113924050633,
+                "brier": 0.22485103129526005,
+                "log_loss": 0.6407680895239011
+              },
+              "candidate": {
+                "count": 79,
+                "wins": 47,
+                "accuracy": 0.5949367088607594,
+                "brier": 0.22426560811210464,
+                "log_loss": 0.6390785570582903
+              }
+            },
+            {
+              "league_id": 19719,
+              "baseline": {
+                "count": 147,
+                "wins": 91,
+                "accuracy": 0.6190476190476191,
+                "brier": 0.23137978675335177,
+                "log_loss": 0.6549450972572166
+              },
+              "candidate": {
+                "count": 147,
+                "wins": 87,
+                "accuracy": 0.5918367346938775,
+                "brier": 0.23236590067644766,
+                "log_loss": 0.6567173096152525
+              }
+            },
+            {
+              "league_id": 19785,
+              "baseline": {
+                "count": 156,
+                "wins": 108,
+                "accuracy": 0.6923076923076923,
+                "brier": 0.2070357168418876,
+                "log_loss": 0.6035906495306855
+              },
+              "candidate": {
+                "count": 156,
+                "wins": 103,
+                "accuracy": 0.6602564102564102,
+                "brier": 0.21440221230278134,
+                "log_loss": 0.6182000497316517
+              }
+            },
+            {
+              "league_id": 20009,
+              "baseline": {
+                "count": 60,
+                "wins": 36,
+                "accuracy": 0.6,
+                "brier": 0.24466261315491442,
+                "log_loss": 0.682124121375669
+              },
+              "candidate": {
+                "count": 60,
+                "wins": 37,
+                "accuracy": 0.6166666666666667,
+                "brier": 0.2361290979399429,
+                "log_loss": 0.6648034076630641
+              }
+            }
+          ]
+        },
+        "promotion_recommended": false,
+        "promoted": false
+      }
+    }
+  ],
+  "live_model_changed": false
+}
