@@ -1,5 +1,8 @@
 import copy
+import hashlib
+import json
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -222,3 +225,85 @@ def test_fixed_blend_is_the_declared_average_without_fitting_holdout_targets():
             split,
             split[2],
         )
+
+
+def test_completed_experiment_is_reused_but_changed_protocol_cannot_overwrite_it(tmp_path):
+    import betbot.experiments as experiments
+    from betbot.domain import timestamp
+
+    rows = history_rows(300)
+    input_path, plan_path = tmp_path / "history.json", tmp_path / "plan.json"
+    input_path.write_text(json.dumps({"rows": rows}), encoding="utf-8")
+    plan_path.write_text(
+        json.dumps({"name": "test", "candidates": [], "development_prefixes": [1]}),
+        encoding="utf-8",
+    )
+    baseline_dir, output = tmp_path / "baseline", tmp_path / "output"
+    baseline_dir.mkdir()
+    output.mkdir()
+    baseline = {
+        "requested_start": timestamp(rows[180]["start_time"]).isoformat(),
+        "requested_end": timestamp(rows[-1]["start_time"] + rows[-1]["duration"] + 61).isoformat(),
+        "history_maps_before_period": 180,
+        "evaluation_scope": None,
+    }
+    (baseline_dir / "report.json").write_text(json.dumps(baseline), encoding="utf-8")
+    protocol = {
+        "plan_sha256": hashlib.sha256(plan_path.read_bytes()).hexdigest(),
+        "implementation_sha256": hashlib.sha256(
+            Path(experiments.__file__).read_bytes()
+        ).hexdigest(),
+        "data_sha256": hashlib.sha256(input_path.read_bytes()).hexdigest(),
+    }
+    (output / "protocol.json").write_text(json.dumps(protocol), encoding="utf-8")
+    saved = '{"promoted": false, "selected_candidate": null}'
+    (output / "comparison.json").write_text(saved, encoding="utf-8")
+    assert experiments.run_experiments(
+        input_path, baseline_dir, plan_path, output, progress=lambda _: None
+    ) == json.loads(saved)
+    plan_path.write_text('{"name":"different"}', encoding="utf-8")
+    with pytest.raises(ValueError, match="different experiment"):
+        experiments.run_experiments(
+            input_path, baseline_dir, plan_path, output, progress=lambda _: None
+        )
+    assert (output / "comparison.json").read_text(encoding="utf-8") == saved
+
+
+def test_new_training_boundary_purges_crossing_series_and_late_labels():
+    from betbot.experiments import earlier_partition
+
+    rows = history_rows(300)
+    rows[149]["series_id"] = rows[150]["series_id"] = 9999
+    rows[148]["duration"] = 99999
+    train, calibration = earlier_partition(rows, list(range(300)), 0.5)
+    assert not {148, 149, 150} & set(train + calibration)
+    assert not {rows[i]["series_id"] for i in train} & {rows[i]["series_id"] for i in calibration}
+    assert max(rows[i]["start_time"] + rows[i]["duration"] + 60 for i in train) < min(
+        rows[i]["start_time"] for i in calibration
+    )
+
+
+def test_monthly_retraining_cannot_use_the_current_or_future_month_results():
+    from betbot.domain import timestamp
+
+    rows = history_rows(900)
+    for i, row in enumerate(rows):
+        row["start_time"] = 1767225600 + i * 21600  # Synthetic Jan-Aug 2026, six-hour spacing.
+    features = build_examples(rows)
+    split = chronological_split(rows)
+    candidate = {
+        "kind": "linear",
+        "features": "classic",
+        "C": 0.15,
+        "monthly_update": True,
+        "monthly_training_fraction": 0.9,
+    }
+    original = fit_candidate(candidate, rows, features, split, split[2])
+    first_month = timestamp(rows[split[2][0]]["start_time"]).month
+    selected = [
+        j for j, i in enumerate(split[2]) if timestamp(rows[i]["start_time"]).month == first_month
+    ]
+    for i in split[2]:
+        rows[i]["radiant_win"] = not rows[i]["radiant_win"]
+    actual = fit_candidate(candidate, rows, features, split, split[2])
+    assert actual[selected] == pytest.approx(original[selected])

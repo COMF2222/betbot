@@ -146,10 +146,46 @@ def training_weights(rows, indices, half_life_days=None):
     return values / values.mean()
 
 
+def earlier_partition(rows, indices, fraction):
+    """Split only available earlier labels, purging series and late completions."""
+    if not 0.5 <= fraction <= 0.95:
+        raise ValueError("Invalid chronological training fraction")
+    indices = sorted(indices, key=lambda i: (rows[i]["start_time"], rows[i]["match_id"]))
+    boundary = int(rows[indices[int(len(indices) * fraction)]]["start_time"])
+    sides = defaultdict(set)
+    for i in indices:
+        row = rows[i]
+        key = f"series:{row['series_id']}" if row.get("series_id") else f"match:{row['match_id']}"
+        sides[key].add(int(row["start_time"]) < boundary)
+    train, calibration = [], []
+    for i in indices:
+        row = rows[i]
+        key = f"series:{row['series_id']}" if row.get("series_id") else f"match:{row['match_id']}"
+        if len(sides[key]) != 1:
+            continue
+        if int(row["start_time"]) < boundary:
+            if int(row["start_time"]) + int(row["duration"]) + 60 < boundary:
+                train.append(i)
+        else:
+            calibration.append(i)
+    return train, calibration
+
+
 def candidate_partition(candidate, rows, split, target_scope=None):
     from .backtest import score_event
 
     train, calibration, _ = split
+    if candidate.get("earlier_training_fraction"):
+        train, calibration = earlier_partition(
+            rows, train + calibration, candidate["earlier_training_fraction"]
+        )
+    if candidate.get("training_days"):
+        boundary = min(int(rows[i]["start_time"]) for i in calibration)
+        train = [
+            i
+            for i in train
+            if int(rows[i]["start_time"]) >= boundary - candidate["training_days"] * 86400
+        ]
     if (
         any(candidate.get(k) for k in ("target_training", "target_calibration", "tier_multiplier"))
         and not target_scope
@@ -165,6 +201,38 @@ def candidate_partition(candidate, rows, split, target_scope=None):
 
 
 def fit_candidate(candidate, rows, features, split, predict_indices, target_scope=None):
+    if candidate.get("monthly_update"):
+        from .presentation import MOSCOW
+
+        months = defaultdict(list)
+        for position, i in enumerate(predict_indices):
+            moment = timestamp(rows[i]["start_time"]).astimezone(MOSCOW)
+            months[moment.replace(day=1, hour=0, minute=0, second=0, microsecond=0)].append(
+                (position, i)
+            )
+        result = np.zeros(len(predict_indices))
+        static = {
+            k: v
+            for k, v in candidate.items()
+            if k not in ("monthly_update", "monthly_training_fraction")
+        }
+        for j, (month, group) in enumerate(sorted(months.items())):
+            partition = split
+            if j:
+                available = [
+                    i
+                    for i, row in enumerate(rows)
+                    if int(row["start_time"]) + int(row["duration"]) + 60 < month.timestamp()
+                ]
+                train, calibration = earlier_partition(
+                    rows, available, candidate["monthly_training_fraction"]
+                )
+                partition = (train, calibration, [])
+            predictions = fit_candidate(
+                static, rows, features, partition, [i for _, i in group], target_scope
+            )
+            result[[position for position, _ in group]] = predictions
+        return result
     if candidate["kind"] == "blend":
         members = candidate["members"]
         weights = np.asarray(candidate["blend_weights"], dtype=float)

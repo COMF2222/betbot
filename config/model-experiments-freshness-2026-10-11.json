@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "name": "round-5-fresh-weights-2026-10-11",
+  "seed": 42,
+  "primary_metric": "brier",
+  "development_prefixes": [0.7, 1.0],
+  "development_scope_path": "tier1-training-2025-2026.json",
+  "minimum_brier_improvement": 0.0005,
+  "selection": "Same earlier Tier 1 folds, no Brier regression in either and no aggregate accuracy regression, lowest mean Brier",
+  "promotion": "No automatic promotion; retain the current live model unless a separate future test confirms improvement",
+  "candidates": [
+    {"name": "baseline", "kind": "linear", "features": "classic", "C": 0.15, "hypothesis": "Control with frozen model weights and causal online ratings"},
+    {"name": "more_recent_weights_70", "kind": "linear", "features": "classic", "C": 0.15, "earlier_training_fraction": 0.875, "hypothesis": "Use 70% for fitting and 10% for calibration instead of 60% and 20%, preserving the last 20% test"},
+    {"name": "more_recent_weights_75", "kind": "linear", "features": "classic", "C": 0.15, "earlier_training_fraction": 0.9375, "hypothesis": "Use 75% for fitting and 5% for calibration so hero weights reflect more recent maps"},
+    {"name": "rolling_training_90_days", "kind": "linear", "features": "classic", "C": 0.15, "earlier_training_fraction": 0.875, "training_days": 90, "hypothesis": "Discard older training examples, while retaining all causal history for player and team ratings"},
+    {"name": "monthly_refit_80", "kind": "linear", "features": "classic", "C": 0.15, "monthly_update": true, "monthly_training_fraction": 0.8, "hypothesis": "Refresh weights at each following month boundary using only results available then, with an 80/20 past-data training/calibration split"},
+    {"name": "monthly_refit_90", "kind": "linear", "features": "classic", "C": 0.15, "monthly_update": true, "monthly_training_fraction": 0.9, "hypothesis": "Monthly updates using a larger and fresher training portion and a smaller calibration portion"}
+  ],
+  "excluded_previous_ideas": ["No further counter coefficient retuning", "No tuning dates, windows or blend weights using four-month outcomes"],
+  "guardrails": ["Current-map outcome never enters fitting", "At monthly updates, labels must be available before month start including a 60-second completion buffer", "Purge series crossing training/calibration boundaries", "Keep earlier development-test maps separate for static models", "Walk-forward models may learn only already completed earlier test maps, as a real deployment would", "No change to full 442-map coverage"]
+}
