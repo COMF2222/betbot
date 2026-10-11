@@ -88,6 +88,11 @@ def feature_view(features, name):
     }
     if name == "classic":
         return base
+    if name == "tier1_ratings":
+        return {
+            **base,
+            **{key: value for key, value in features.items() if key.startswith("tier1:")},
+        }
     if name in ("series_basic", "series_full", "series_compact"):
         from .series_context import BASIC_SERIES_FEATURES
 
@@ -110,13 +115,13 @@ def feature_view(features, name):
         return {
             key: value
             for key, value in features.items()
-            if not key.startswith((*direct, "series:"))
+            if not key.startswith((*direct, "series:", "tier1:"))
         }
     if name == "compact":
         return {
             key: value
             for key, value in features.items()
-            if not key.startswith(("pair:", *direct, "series:"))
+            if not key.startswith(("pair:", *direct, "series:", "tier1:"))
         }
     raise ValueError(f"Unknown research feature view: {name}")
 
@@ -216,6 +221,12 @@ def candidate_partition(candidate, rows, split, target_scope=None):
         train = [i for i in train if score_event(rows[i], target_scope)]
     if candidate.get("target_calibration"):
         calibration = [i for i in calibration if score_event(rows[i], target_scope)]
+    if candidate.get("exclude_training_leagues"):
+        excluded = set(candidate["exclude_training_leagues"])
+        train = [i for i in train if rows[i]["leagueid"] not in excluded]
+    if candidate.get("exclude_calibration_leagues"):
+        excluded = set(candidate["exclude_calibration_leagues"])
+        calibration = [i for i in calibration if rows[i]["leagueid"] not in excluded]
     if len(train) < 100 or len(calibration) < 50:
         raise ValueError("Insufficient earlier maps for training or calibration")
     return train, calibration
@@ -489,6 +500,12 @@ def run_experiments(
         protocol["series_implementation_sha256"] = hashlib.sha256(
             Path(__file__).with_name("series_context.py").read_bytes()
         ).hexdigest()
+    if plan.get("tier1_ratings"):
+        if not target_scope:
+            raise ValueError("Tier 1 rating features require a verified scope")
+        protocol["target_implementation_sha256"] = hashlib.sha256(
+            Path(__file__).with_name("target_history.py").read_bytes()
+        ).hexdigest()
     if feature_cache:
         protocol["feature_cache_sha256"] = hashlib.sha256(feature_cache.read_bytes()).hexdigest()
     previous_protocol = output / "protocol.json"
@@ -503,6 +520,7 @@ def run_experiments(
                 "development_scope",
                 "training_scope",
                 "series_implementation_sha256",
+                "target_implementation_sha256",
                 "feature_cache_sha256",
             )
         ):
@@ -557,6 +575,24 @@ def run_experiments(
                 "total": len(features),
             }
         )
+    if plan.get("tier1_ratings"):
+        from .target_history import augment_target_features
+
+        combined_scope = {"events": target_scope["events"] + baseline["evaluation_scope"]["events"]}
+        features = augment_target_features(rows, features, combined_scope)
+        with (output / "blind-tier1-features.jsonl").open("w", encoding="utf-8") as stream:
+            for row, values in zip(rows, features, strict=True):
+                stream.write(
+                    json.dumps(
+                        {
+                            "match_id": str(row["match_id"]),
+                            "observed_at": timestamp(row["start_time"]).isoformat(),
+                            "features": values,
+                        }
+                    )
+                    + "\n"
+                )
+        emit({"tier1_rating_features": len(features)})
     records = {c["name"]: [] for c in plan["candidates"]}
     for fold, prefix in enumerate(plan["development_prefixes"]):
         count = int(before_count * prefix)

@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "name": "round-8-data-composition-and-tier1-ratings-2026-10-11",
+  "seed": 42,
+  "primary_metric": "accuracy",
+  "development_prefixes": [0.7, 1.0],
+  "development_scope_path": "tier1-training-2025-2026.json",
+  "training_scope_path": "tier1-training-2025-2026.json",
+  "minimum_accuracy_improvement": 0.005,
+  "maximum_brier_regression": 0.002,
+  "tier1_ratings": true,
+  "selection": "Improve aggregate earlier winner accuracy by at least 0.5 percentage points; no accuracy regression in either fold; Brier regression at most 0.002 in each; highest accuracy then lowest mean Brier",
+  "promotion": "No automatic promotion; new independent future results required",
+  "excluded_leagues_basis": "Destiny IDs 18959/17233, Space IDs 19201/16110, Ultras ID 18867 contain 9725 of 18231 earlier maps. This tests dataset composition; it does not label these matches as fixed or fraudulent.",
+  "candidates": [
+    {"name": "baseline", "kind": "linear", "features": "classic", "C": 0.15},
+    {"name": "exclude_small_leagues_training", "kind": "linear", "features": "classic", "C": 0.15, "exclude_training_leagues": [18959, 17233, 19201, 16110, 18867], "hypothesis": "Prevent three prolific league families from dominating learned hero and pair weights while retaining full past rating history"},
+    {"name": "exclude_small_leagues_both", "kind": "linear", "features": "classic", "C": 0.15, "exclude_training_leagues": [18959, 17233, 19201, 16110, 18867], "exclude_calibration_leagues": [18959, 17233, 19201, 16110, 18867], "hypothesis": "Fit and calibrate on the remaining pro competitions without making classification claims about omitted leagues"},
+    {"name": "tier1_independent_ratings", "kind": "linear", "features": "tier1_ratings", "C": 0.15, "hypothesis": "Separate causal team/player/player-hero ratings from verified main Tier 1 events complement global ratings"},
+    {"name": "tier1_ratings_clean_training", "kind": "linear", "features": "tier1_ratings", "C": 0.15, "exclude_training_leagues": [18959, 17233, 19201, 16110, 18867], "exclude_calibration_leagues": [18959, 17233, 19201, 16110, 18867], "hypothesis": "Combine a less concentrated fitting sample with independent Tier 1 player and team history"},
+    {"name": "tier1_only_stronger_shrinkage", "kind": "linear", "features": "classic", "C": 0.05, "target_training": true, "target_calibration": true, "hypothesis": "Smaller Tier 1 samples need stronger shrinkage of rarely observed hero pairs than the earlier C=0.15 variant"}
+  ],
+  "guardrails": ["Exclusions affect fitting/calibration only; final coverage remains all 442 Tier 1 maps", "Target ratings update only after an earlier confirmed result plus 60 seconds", "Tier 1 definition requires exact league ID and event date window", "Current-map result cannot enter either rating history", "Final-era tournament identities are predefined by the established scope; outcomes are not used to choose events", "The live model and existing forecasts remain unchanged"]
+}
