@@ -223,6 +223,16 @@ def publications(service, notice=""):
             ],
             [button("🎯 Порог сигнала", "ui:threshold"), button("⏱ Тоталы времени", "ui:duration")],
             [button("📅 Время отчётов", "ui:report-hours")],
+            [
+                button(
+                    "Утренний анонс ✓"
+                    if service.store.get(
+                        "morning_brief_enabled", service.settings.morning_brief_enabled
+                    )
+                    else "Утренний анонс: выкл.",
+                    "ui:toggle:morning",
+                )
+            ],
         ],
         "ui:home",
     )
@@ -248,7 +258,7 @@ def threshold(service):
 def sources(service):
     active = service.store.get("source:Polymarket", True)
     text = (
-        f"💱 <b>Источники котировок</b>\n\n<b>Polymarket</b> · {'включён' if active else 'выключен'}\nЦены берутся из стакана покупки для подтверждённой карты.\n\n<b>1win · BetBoom · Winline · PARI</b>\n"
+        f"💱 <b>Источники котировок</b>\n\n<b>Polymarket</b> · {'включён' if active else 'выключен'}\nКэф — 1 / отображаемая цена рынка для конкретной карты. Цена покупки хранится отдельно; история рынка дополняет снимки во время игры.\n\n<b>1win · BetBoom · Winline · PARI</b>\n"
         + (
             "Поставщик настроен. Доступность конкретных площадок зависит от его линии."
             if service.feed or service.odds

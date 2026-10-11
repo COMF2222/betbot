@@ -31,7 +31,7 @@ def short_reasons(p: Prediction, heroes: dict | None = None) -> str:
     sign = 1 if p.favorite == "radiant" else -1
     reasons = []
     if sign * p.features.get("player_elo", 0) > 0.025:
-        reasons.append("Рейтинг игроков выше")
+        reasons.append("Игроки сильнее")
     elif sign * p.features.get("hero_experience", 0) > 0.01:
         reasons.append("Игроки успешнее на своих героях")
     elif sign * p.features.get("team_elo", 0) > 0.025:
@@ -40,19 +40,39 @@ def short_reasons(p: Prediction, heroes: dict | None = None) -> str:
     for item in p.analysis.get("counters", []):
         if item.get("count", 0) >= 20 and item.get("win_rate", 0) >= 0.55:
             statistics.append(
-                f"{hero(item['hero'])} против {hero(item['enemy'])}: {item['win_rate']:.0%} побед ({item['count']} карт)"
+                (
+                    item.get("excess", item["win_rate"] - 0.5),
+                    f"{hero(item['hero'])} бьёт {hero(item['enemy'])} в {item['win_rate']:.0%} игр",
+                )
             )
     for item in p.analysis.get("lanes", []):
         if item.get("count", 0) >= 20 and item.get("map_win_rate", 0) >= 0.55:
             statistics.append(
-                f"связка {hero(item['core'])} + {hero(item['support'])}: {item['map_win_rate']:.0%} побед ({item['count']} карт)"
+                (
+                    (item["map_win_rate"] - 0.5) * item["count"] / (item["count"] + 30),
+                    f"связка {hero(item['core'])} + {hero(item['support'])} берёт {item['map_win_rate']:.0%} игр",
+                )
             )
+    for item in p.analysis.get("pairs", []):
+        if item.get("count", 0) < 20 or item.get("advantage", 0) <= 0:
+            continue
+        own = item["side"] == p.favorite
+        if (own and item["win_rate"] < 0.55) or (not own and item["win_rate"] > 0.45):
+            continue
+        team = p.draft.radiant_name if item["side"] == "radiant" else p.draft.dire_name
+        a, b = item["heroes"]
+        statistics.append(
+            (
+                item["advantage"],
+                f"сочетание {hero(a)} + {hero(b)} у {team} берёт {'лишь ' if not own else ''}{item['win_rate']:.0%} игр",
+            )
+        )
     if statistics:
-        prefix = "по истории: " if not p.analysis.get("used_in_model", False) else ""
-        reasons += [prefix + item for item in statistics[: 2 - len(reasons)]]
+        statistics.sort(key=lambda item: item[0], reverse=True)
+        reasons += [item for _, item in statistics[: 2 - len(reasons)]]
     if not reasons:
         reasons.append("Небольшой перевес по сумме игроков и драфта")
-    return esc("; ".join(reasons), 260)
+    return esc(", ".join(reasons), 260)
 
 
 def market_snapshot(p: Prediction, max_age=None, now=None):
@@ -100,7 +120,10 @@ def caption(p: Prediction, max_age: int = 30, heroes=None, now=None) -> str:
         )
     own, other, probability = market_snapshot(p, max_age, now)
     if own:
-        line = f"Рынок: {esc(own.source, 25)} · {esc(p.favorite_name, 45)} <b>{own.odds:.2f}</b> ({probability:.0%})"
+        label = "Рынок"
+        if (own.observed_at - p.draft.observed_at).total_seconds() > 30:
+            label += f" на {own.observed_at.astimezone(MOSCOW):%H:%M}"
+        line = f"{label}: {esc(p.favorite_name, 45)} <b>{own.odds:.2f}</b> ({probability:.0%})"
         if other:
             line += f", {esc(opponent, 45)} {other.odds:.2f}"
         info.append(line)
@@ -108,7 +131,7 @@ def caption(p: Prediction, max_age: int = 30, heroes=None, now=None) -> str:
         info.append("Рынок: кэф на эту карту пока недоступен.")
     lines.append("ℹ️ " + " ".join(info))
     if p.late_analysis:
-        lines.append("⏱ Поздний разбор · отдельный учёт.")
+        lines.append("⏱ Разбор с задержкой.")
     return "\n".join(lines)
 
 
@@ -154,10 +177,13 @@ def explanation(p: Prediction, heroes: dict[int, dict], max_age: int = 30) -> st
     if groups:
         lines.append("\n<b>Цена и вероятность</b>")
         for q in groups[:3]:
-            expectation = p.favorite_probability * q.odds - 1
+            executable_odds = q.ask_odds if q.price_kind == "market" else q.odds
+            if executable_odds is None:
+                continue
+            expectation = p.favorite_probability * executable_odds - 1
             label = "до расходов" if q.gross else "по условиям указанного рынка"
             lines.append(
-                f"{esc(q.source, 25)}: ожидание по модели {expectation:+.1%} на условную единицу, {label}."
+                f"{esc(q.source, 25)}: покупка по кэфу {executable_odds:.2f}, ожидание по модели {expectation:+.1%} на условную единицу, {label}."
             )
         lines.append(
             "Цены с разными правилами расчёта или неизвестными расходами сравниваются отдельно."
@@ -179,6 +205,8 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
     signal = f"{p.favorite_probability:.0%}, {stars(p.favorite_probability)}"
     own, _, market_probability = market_snapshot(p)
     price = f", кэф {own.odds:.2f}" if own else ""
+    if own and (own.observed_at - p.draft.observed_at).total_seconds() > 30:
+        price += f" (на {own.observed_at.astimezone(MOSCOW):%H:%M})"
     if win:
         lines = [f"✅ <b>Зашло: {esc(winner, 60)} взяли {label}</b>, {signal}{price}"]
     else:
@@ -195,33 +223,38 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
     if own and finish:
         for snapshot in snapshots or []:
             when = timestamp(snapshot.get("observed_at"))
-            if not when or not max(start, p.draft.observed_at) <= when <= finish:
+            if not when or not max(start, p.draft.observed_at, own.observed_at) <= when <= finish:
                 continue
             for raw in snapshot.get("quotes", []):
                 q = Quote.from_dict(raw)
                 if (
-                    q.source,
-                    q.match_id,
-                    q.map_number,
-                    q.market,
-                    q.rules,
-                    q.gross,
-                    q.market_id,
-                ) != (
-                    own.source,
-                    own.match_id,
-                    own.map_number,
-                    own.market,
-                    own.rules,
-                    own.gross,
-                    own.market_id,
-                ) or not q.fresh(when, 30):
+                    (
+                        q.source,
+                        q.match_id,
+                        q.map_number,
+                        q.market,
+                        q.rules,
+                        q.gross,
+                        q.market_id,
+                    )
+                    != (
+                        own.source,
+                        own.match_id,
+                        own.map_number,
+                        own.market,
+                        own.rules,
+                        own.gross,
+                        own.market_id,
+                    )
+                    or q.price_kind != own.price_kind
+                    or not q.fresh(when, 30)
+                ):
                     continue
                 observations.append(q)
     if win and observations:
         peak = max((q.odds for q in observations if q.outcome == p.favorite), default=own.odds)
         if peak > own.odds + 0.01:
-            lines[0] += f", по ходу до {peak:.2f}"
+            lines[0] += f", наблюдали до {peak:.2f}"
     elif not win:
         winner_side = "radiant" if radiant_win else "dire"
         comeback = max(
@@ -229,9 +262,9 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
             key=lambda q: q.odds,
             default=None,
         )
-        if comeback and 1 / comeback.odds <= 0.15:
+        if comeback and 1 / comeback.odds <= 0.4:
             lines.append(
-                f"👉 По ходу цена {esc(winner, 45)} падала до {1 / comeback.odds:.0%} (кэф {comeback.odds:.2f}), но они выиграли карту"
+                f"👉 По ходу рынок давал {esc(winner, 45)} {1 / comeback.odds:.0%} (кэф {comeback.odds:.2f}), но они выиграли карту"
             )
         if market_probability is not None:
             expected = p.favorite_name if market_probability >= 0.5 else winner
@@ -240,7 +273,7 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
                 f"ℹ️ Рынок {'тоже ' if market_probability >= 0.5 else ''}ждал {esc(expected, 45)} ({probability:.0%})"
             )
     if p.late_analysis:
-        lines.append("⏱ Поздний разбор · отдельный учёт.")
+        lines.append("⏱ Разбор с задержкой.")
     if result.get("duration"):
         seconds = int(result["duration"])
         for total in p.totals[:3]:

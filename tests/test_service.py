@@ -59,6 +59,71 @@ async def test_collect_creates_once_and_default_is_preview(service, draft):
     assert service.store.forecast(id_)["state"] == "preview"
 
 
+async def test_missing_quotes_are_added_to_the_same_post_without_changing_the_forecast(
+    service, draft
+):
+    from betbot.domain import Quote
+
+    id_ = await service.process_draft(draft)
+    service.bot = SimpleNamespace(
+        send_photo=AsyncMock(return_value=SimpleNamespace(message_id=100)),
+        edit_message_media=AsyncMock(),
+    )
+    await service.publish(id_)
+    row = service.store.forecast(id_)
+    before = row["payload"]
+    p = service.saved_prediction(before)
+    q = Quote(
+        "Polymarket",
+        draft.match_id,
+        "map_winner",
+        p.favorite,
+        1.54,
+        utcnow(),
+        None,
+        2,
+        price_kind="market",
+    )
+    await service.attach_missing_quotes(id_, p, [q])
+    await service.attach_missing_quotes(id_, p, [q])
+    assert service.bot.edit_message_media.await_count == 1
+    assert service.bot.edit_message_media.call_args.kwargs["message_id"] == 100
+    assert service.store.forecast(id_)["payload"] == before
+
+
+async def test_morning_brief_runs_at_ten_moscow_and_is_deduplicated(service, monkeypatch):
+    from datetime import datetime
+
+    from betbot.presentation import MOSCOW
+
+    service.store.set("auto_publish", True)
+    service.store.set("poly_league:123", "BLAST Slam")
+    service.bot = SimpleNamespace(
+        send_message=AsyncMock(return_value=SimpleNamespace(message_id=200))
+    )
+    service.poly.discover = AsyncMock(
+        return_value=[
+            {
+                "id": "a",
+                "title": "Dota 2: A vs B - BLAST Slam Playoffs",
+                "startTime": "2026-10-11T09:00:00Z",
+                "teams": [{"name": "A"}, {"name": "B"}],
+            }
+        ]
+    )
+    monkeypatch.setattr("betbot.service.utcnow", lambda: datetime(2026, 10, 11, 9, tzinfo=MOSCOW))
+    await service.morning_brief()
+    service.bot.send_message.assert_not_awaited()
+    monkeypatch.setattr("betbot.service.utcnow", lambda: datetime(2026, 10, 11, 10, tzinfo=MOSCOW))
+    await service.morning_brief()
+    await service.morning_brief()
+    assert service.bot.send_message.await_count == 1
+    assert "12:00 МСК" in service.bot.send_message.call_args.args[1]
+    monkeypatch.setattr("betbot.service.utcnow", lambda: datetime(2026, 10, 11, 17, tzinfo=MOSCOW))
+    await service.morning_brief()
+    assert service.bot.send_message.await_count == 1
+
+
 async def test_uncertain_remote_send_is_not_retried(service, draft):
     id_ = await service.process_draft(draft)
     service.bot = SimpleNamespace(

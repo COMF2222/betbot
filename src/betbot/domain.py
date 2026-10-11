@@ -107,6 +107,10 @@ class Quote:
     gross: bool = False
     liquidity: float | None = None
     market_id: str = ""
+    price_kind: str = "offer"
+    token_id: str = ""
+    ask_odds: float | None = None
+    price_origin: str = "live"
 
     def fresh(self, now: datetime, max_age: int) -> bool:
         age = (now - (self.source_updated_at or self.observed_at)).total_seconds()
@@ -134,7 +138,16 @@ def best_quotes(quotes: list[Quote], now: datetime, max_age: int) -> list[Quote]
     for q in quotes:
         if not q.fresh(now, max_age):
             continue
-        key = (q.match_id, q.market, q.map_number, q.outcome, q.line, q.rules, q.gross)
+        key = (
+            q.match_id,
+            q.market,
+            q.map_number,
+            q.outcome,
+            q.line,
+            q.rules,
+            q.gross,
+            q.price_kind,
+        )
         if key not in best or q.odds > best[key].odds:
             best[key] = q
     return list(best.values())

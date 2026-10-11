@@ -11,6 +11,18 @@ import numpy as np
 
 from .analytics import DraftAnalytics
 from .domain import Draft, Player, Prediction, timestamp, utcnow
+from .form import FormHistory, PlayerSkills
+
+FEATURE_SETS = (
+    "classic",
+    "roster",
+    "detailed",
+    "form",
+    "matchups",
+    "adaptive",
+    "players",
+    "players_form",
+)
 
 
 def sigmoid(value: float) -> float:
@@ -26,6 +38,8 @@ class History:
         self.rosters = dict(raw.get("rosters", {}))
         self.games = int(raw.get("games", 0))
         self.analytics = DraftAnalytics(raw.get("analytics"))
+        self.form = FormHistory(raw.get("form"))
+        self.player_skills = PlayerSkills(raw.get("player_skills"))
 
     def export(self) -> dict:
         return {
@@ -35,6 +49,8 @@ class History:
             "games": self.games,
             "rosters": self.rosters,
             "analytics": self.analytics.export(),
+            "form": self.form.records,
+            "player_skills": self.player_skills.ratings,
         }
 
     def features(
@@ -73,7 +89,7 @@ class History:
                 )
 
             features["hero_experience"] = experience(draft.radiant) - experience(draft.dire)
-            if feature_set == "roster":
+            if feature_set in ("roster", "form", "adaptive", "players_form"):
 
                 def retention(team_id, players):
                     previous = set(self.rosters.get(str(team_id), []))
@@ -90,6 +106,18 @@ class History:
                 features["roster_retention"] = r - d
             if feature_set == "detailed":
                 features.update(self.analytics.features(draft))
+            if feature_set in ("form", "adaptive", "players_form"):
+                features.update(self.form.features(draft))
+            if feature_set in ("players", "players_form"):
+                features.update(self.player_skills.features(draft, self.analytics))
+            if feature_set in ("matchups", "adaptive"):
+                detailed = self.analytics.features(draft)
+                for key in ("counter_advantage", "pair_advantage"):
+                    features[key] = detailed[key]
+                if draft.patch is not None:
+                    for players, sign in ((draft.radiant, 1), (draft.dire, -1)):
+                        for player in players:
+                            features[f"patch_hero:{draft.patch}:{player.hero_id}"] = sign
         return features
 
     def duration_features(self, draft: Draft) -> dict[str, float]:
@@ -104,6 +132,8 @@ class History:
     def update(self, draft: Draft, radiant_win: bool, context: dict | None = None) -> None:
         rid, did = str(draft.radiant_id), str(draft.dire_id)
         expected = 1 / (1 + 10 ** ((self.teams[did] - self.teams[rid]) / 400))
+        self.form.update(draft, radiant_win, expected)
+        self.player_skills.update(draft, radiant_win)
         self.analytics.update(draft, radiant_win, expected, context)
         change = 24 * (int(radiant_win) - expected)
         self.teams[rid] += change
@@ -214,7 +244,7 @@ def fit(rows: list[dict], output: Path, feature_set: str = "classic") -> dict:
     from sklearn.linear_model import LogisticRegression, Ridge
     from sklearn.metrics import brier_score_loss, log_loss
 
-    if feature_set not in ("classic", "roster", "detailed"):
+    if feature_set not in FEATURE_SETS:
         raise ValueError("Неизвестный набор признаков")
 
     unique = {str(r.get("match_id")): r for r in rows if historical_draft(r)}
@@ -373,7 +403,7 @@ def fit(rows: list[dict], output: Path, feature_set: str = "classic") -> dict:
     ).hexdigest()[:12]
     artifact = {
         "schema": 1,
-        "version": f"{ {'classic': 'logistic-v2', 'roster': 'roster-v1', 'detailed': 'draft-v3'}[feature_set] }-{fingerprint}",
+        "version": f"{ {'classic': 'logistic-v2', 'roster': 'roster-v1', 'detailed': 'draft-v3', 'form': 'form-v1', 'matchups': 'matchups-v1', 'adaptive': 'adaptive-v1', 'players': 'players-v1', 'players_form': 'players-form-v1'}[feature_set] }-{fingerprint}",
         "feature_set": feature_set,
         "created_at": utcnow().isoformat(),
         "history_cutoff": timestamp(
@@ -512,8 +542,33 @@ class Model:
             reasons.append(
                 value + ". Это экономика игрока к 10-й минуте, не вероятность выиграть линию."
             )
-        analysis["used_in_model"] = self.raw.get("feature_set") == "detailed"
-        if not analysis["used_in_model"]:
+        feature_set = self.raw.get("feature_set", "classic")
+        analysis["model_features"] = [
+            key
+            for key in features
+            if key
+            in (
+                "counter_advantage",
+                "pair_advantage",
+                "lane_synergy",
+                "mid_matchup",
+                "mid_gold10",
+                "recent_team_form",
+                "recent_player_form",
+                "recent_comfort_form",
+                "recent_lineup_form",
+                "lineup_player_elo",
+                "core_player_elo",
+                "mid_player_elo",
+                "roster_elo",
+            )
+        ]
+        analysis["used_in_model"] = feature_set == "detailed"
+        if feature_set in ("matchups", "adaptive"):
+            reasons.append(
+                "Модель использует агрегаты контрпиков и сочетаний с поправкой на силу команд. Статистика линий и мида остаётся справочной."
+            )
+        elif not analysis["used_in_model"]:
             reasons.append(
                 "Статистика контрпиков и линий приведена справочно; её отдельные признаки пока не прошли сравнительный тест модели."
             )

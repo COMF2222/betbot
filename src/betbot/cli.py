@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from .config import Settings
 from .demo import demo_prediction
 from .domain import utcnow
-from .model import fit
+from .model import FEATURE_SETS, fit
 from .network import route_label, telegram_bot, telegram_proxy
 from .presentation import render_card
 from .providers import BOOKMAKERS, HTTP, OddsPapi, OpenDota, Polymarket, eligible_draft
@@ -308,9 +308,7 @@ def parser() -> argparse.ArgumentParser:
     training = sub.add_parser("train", help="Собрать историю и обучить модель с временным тестом")
     training.add_argument("--limit", type=int, default=5000)
     training.add_argument("--input", type=Path)
-    training.add_argument(
-        "--feature-set", choices=("classic", "roster", "detailed"), default="classic"
-    )
+    training.add_argument("--feature-set", choices=FEATURE_SETS, default="classic")
     historical = sub.add_parser(
         "backtest", help="Заморозить модель до периода и проверить исторические карты"
     )
@@ -328,7 +326,7 @@ def parser() -> argparse.ArgumentParser:
     )
     historical.add_argument(
         "--feature-set",
-        choices=("classic", "roster", "detailed"),
+        choices=FEATURE_SETS,
         default="classic",
         help="Сравнение базовой модели, состава и подробной статистики драфта",
     )

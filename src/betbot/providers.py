@@ -391,6 +391,40 @@ class Polymarket:
         return await self.http.get(f"https://gamma-api.polymarket.com/events/{event_id}")
 
     @staticmethod
+    def displayed_price(book):
+        def levels(side):
+            result = []
+            for level in book.get(side, []):
+                try:
+                    price, size = float(level["price"]), float(level["size"])
+                    if (
+                        math.isfinite(price)
+                        and math.isfinite(size)
+                        and 0 <= price <= 1
+                        and size > 0
+                    ):
+                        result.append((price, size))
+                except (KeyError, ValueError, TypeError):
+                    continue
+            return result
+
+        asks, bids = levels("asks"), levels("bids")
+        ask = min((p for p, _ in asks), default=None)
+        bid = max((p for p, _ in bids), default=None)
+        price = None
+        if ask is not None and bid is not None and 0 <= ask - bid <= 0.1 + 1e-9:
+            price = (ask + bid) / 2
+        elif ask is None or bid is None or ask >= bid:
+            try:
+                price = float(book.get("last_trade_price"))
+            except (ValueError, TypeError):
+                pass
+        if price is None or not math.isfinite(price) or not 0 < price < 1:
+            return None
+        liquidity = sum(size for p, size in asks if p == ask) * ask if ask else None
+        return price, (1 / ask if ask and ask < 1 else None), liquidity
+
+    @staticmethod
     def find_event(draft: Draft, events: list[dict], aliases: dict | None = None) -> dict | None:
         aliases = aliases or {}
         rname = normalized(aliases.get(str(draft.radiant_id), draft.radiant_name))
@@ -447,15 +481,10 @@ class Polymarket:
             book = await self.http.get(
                 "https://clob.polymarket.com/book", {"token_id": str(asset_id)}
             )
-            levels = [
-                (float(x["price"]), float(x["size"]))
-                for x in book.get("asks", [])
-                if 0 < float(x["price"]) < 1 and float(x["size"]) > 0
-            ]
-            if not levels:
+            selected = self.displayed_price(book)
+            if not selected:
                 continue
-            price = min(p for p, _ in levels)
-            size = sum(s for p, s in levels if p == price)
+            price, ask_odds, liquidity = selected
             # Book timestamp often means last mutation, not this read. Observed_at is the
             # current direct read; changed timestamp is retained in market metadata separately.
             result.append(
@@ -471,10 +500,54 @@ class Polymarket:
                     rules="polymarket:" + str(market.get("conditionId") or market["id"]),
                     url="https://polymarket.com/event/" + str(event.get("slug", "")),
                     gross=True,
-                    liquidity=size * price,
+                    liquidity=liquidity,
                     market_id=str(market["id"]),
+                    price_kind="market",
+                    token_id=str(asset_id),
+                    ask_odds=ask_odds,
                 )
             )
+        return result
+
+    async def history(self, quotes, start, end):
+        """One-minute chart samples; never used as a forecast-time quote."""
+        result = []
+        if start > end:
+            return result
+        for q in quotes:
+            if (
+                q.source != self.name
+                or q.market != "map_winner"
+                or q.price_kind != "market"
+                or not q.token_id
+            ):
+                continue
+            data = await self.http.get(
+                "https://clob.polymarket.com/prices-history",
+                {
+                    "market": q.token_id,
+                    "startTs": int(start.timestamp()),
+                    "endTs": int(end.timestamp()),
+                    "fidelity": 1,
+                },
+            )
+            for tick in data.get("history", []):
+                try:
+                    when, price = timestamp(tick["t"]), float(tick["p"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if when and start <= when <= end and math.isfinite(price) and 0 < price < 1:
+                    result.append(
+                        replace(
+                            q,
+                            odds=1 / price,
+                            observed_at=when,
+                            source_updated_at=when,
+                            ask_odds=None,
+                            liquidity=None,
+                            price_origin="history",
+                        )
+                    )
         return result
 
 

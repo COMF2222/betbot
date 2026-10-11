@@ -197,7 +197,7 @@ async def test_low_confidence_delayed_analysis_is_published_once_to_both_destina
     assert service.bot.send_photo.await_count == 2
     for call in service.bot.send_photo.call_args_list:
         assert (
-            "Поздний разбор" in call.kwargs["caption"] and "Слабый сигнал" in call.kwargs["caption"]
+            "Разбор с задержкой" in call.kwargs["caption"] and "Слабый сигнал" in call.kwargs["caption"]
         )
     service.store.result(draft.match_id, {"radiant_win": True})
     stats = service.store.summary()

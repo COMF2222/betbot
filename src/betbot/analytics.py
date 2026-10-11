@@ -262,6 +262,24 @@ class DraftAnalytics:
                         }
                     )
         counters.sort(key=lambda x: x["excess"], reverse=True)
+        pairs = []
+        for side, players, sign in (
+            (favorite, favored, 1),
+            ("dire" if favorite == "radiant" else "radiant", enemies, -1),
+        ):
+            for a, b in itertools.combinations(sorted(p.hero_id for p in players), 2):
+                stats = self.pairs.get(f"{prefix}:{a}:{b}")
+                if stats and stats["n"] >= 20:
+                    pairs.append(
+                        {
+                            "side": side,
+                            "heroes": [a, b],
+                            "count": stats["n"],
+                            "win_rate": stats["wins"] / stats["n"],
+                            "advantage": sign * self.excess(stats),
+                        }
+                    )
+        pairs.sort(key=lambda item: item["advantage"], reverse=True)
         lane_details = []
         positioned = self.positioned(roles[favorite])
         for core, support in ((1, 5), (3, 4)):
@@ -304,6 +322,7 @@ class DraftAnalytics:
             ),
             "patch": draft.patch,
             "counters": counters[:2],
+            "pairs": pairs[:3],
             "lanes": lane_details,
             "mid": mid,
         }

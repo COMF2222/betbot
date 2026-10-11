@@ -780,6 +780,7 @@ def build_router(service: Service) -> Router:
                 "duration": "duration_enabled",
                 "all-maps": "publish_all_maps",
                 "delayed": "allow_delayed_analysis",
+                "morning": "morning_brief_enabled",
             }.get(kind)
             if not key:
                 return
@@ -787,6 +788,9 @@ def build_router(service: Service) -> Router:
                 "auto": service.automatic,
                 "all-maps": service.publish_all_maps,
                 "delayed": service.allow_delayed_analysis,
+                "morning": service.store.get(
+                    "morning_brief_enabled", service.settings.morning_brief_enabled
+                ),
             }.get(kind, service.store.get(key, False))
             notice = ""
             if (

@@ -247,7 +247,7 @@ class Store:
         query += " ORDER BY f.created_at,f.id"
         return [dict(row) for row in self.db.execute(query, args)]
 
-    def save_quotes(self, match_id: str, quotes) -> None:
+    def save_quotes(self, match_id: str, quotes, observed_at=None) -> None:
         if not quotes:
             return
         with self.db:
@@ -255,7 +255,7 @@ class Store:
                 "INSERT INTO quote_history(match_id,observed_at,quotes) VALUES(?,?,?)",
                 (
                     match_id,
-                    utcnow().isoformat(),
+                    (observed_at or utcnow()).isoformat(),
                     json.dumps([q.to_dict() for q in quotes], ensure_ascii=False),
                 ),
             )
@@ -409,6 +409,12 @@ class Store:
                 (limit,),
             )
         ]
+
+    def report_state(self, period: str, destination: int):
+        row = self.db.execute(
+            "SELECT state FROM reports WHERE period=? AND destination=?", (period, destination)
+        ).fetchone()
+        return row[0] if row else None
 
     def begin_report(self, period: str, destination: int) -> bool:
         with self.db:

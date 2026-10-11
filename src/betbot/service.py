@@ -22,7 +22,7 @@ from .config import Settings
 from .domain import Draft, Prediction, timestamp, utcnow
 from .leagues import activity_snapshot, calendar_events
 from .model import History, Model
-from .presentation import MOSCOW, caption, render_card, result_text
+from .presentation import MOSCOW, caption, market_snapshot, render_card, result_text
 from .providers import (
     HTTP,
     OddsFeed,
@@ -335,15 +335,20 @@ class Service:
                     event = self.poly.find_event(draft, events, aliases)
                     # A configured tournament keyword plus unique team/date pairing is
                     # needed for automatic binding. Otherwise it remains an admin suggestion.
-                    keyword = self.store.get(f"poly_league:{draft.league_id}", "")
+                    keywords = self.market_keywords(draft.league_id, draft.observed_at)
                     if (
                         not event
-                        or not keyword
-                        or normalized(keyword) not in normalized(event.get("title", ""))
+                        or not keywords
+                        or not any(
+                            normalized(keyword) in normalized(event.get("title", ""))
+                            for keyword in keywords
+                        )
                     ):
                         event = None
                 if event:
                     quotes.extend(await self.poly.quotes(draft, event, aliases))
+                    if quotes and not binding:
+                        self.store.set(f"poly:{draft.match_id}", str(event["id"]))
                 self.store.health(
                     "Polymarket",
                     True,
@@ -371,6 +376,47 @@ class Service:
             if self.store.get(f"source:{q.source}", True)
             and q.fresh(utcnow(), self.settings.quote_max_age_seconds)
         ]
+
+    def market_keywords(self, league_id, moment=None):
+        override = self.store.get(f"poly_league:{league_id}")
+        if override is not None:
+            return [override] if override else []
+        day = (moment or utcnow()).astimezone(MOSCOW).date().isoformat()
+        return [
+            keyword
+            for event in self.calendar
+            if int(event["league_id"]) == int(league_id)
+            and event["start_date"] <= day <= event["end_date"]
+            for keyword in event.get("market_keywords", [])
+        ]
+
+    async def complete_price_history(self, p, result):
+        key = f"price_history:{p.draft.match_id}"
+        if self.store.get(key):
+            return
+        start = timestamp(result.get("start_time"))
+        duration = result.get("duration")
+        if (
+            not start
+            or not duration
+            or not any(
+                q.source == "Polymarket" and q.price_kind == "market" and q.token_id
+                for q in p.quotes
+            )
+        ):
+            return
+        end = start + timedelta(seconds=int(duration))
+        try:
+            since = max(start, p.draft.observed_at, min(q.observed_at for q in p.quotes))
+            snapshots = await self.poly.history(p.quotes, since, end)
+            groups = {}
+            for q in snapshots:
+                groups.setdefault(q.observed_at, []).append(q)
+            for when, quotes in sorted(groups.items()):
+                self.store.save_quotes(p.draft.match_id, quotes, observed_at=when)
+            self.store.set(key, True)
+        except Exception as exc:
+            self.store.health("История Polymarket", False, type(exc).__name__)
 
     async def process_draft(self, draft: Draft) -> int | None:
         if not self.store.enabled(draft.league_id):
@@ -611,12 +657,28 @@ class Service:
             result = json.loads(row["result"])
             if not isinstance(result.get("radiant_win"), bool):
                 continue
+            p = self.saved_prediction(row["payload"])
+            if not p.quotes:
+                from .domain import Quote
+
+                attached = self.store.get(f"quote_attached:{row['id']}:{row['destination']}", [])
+                start = timestamp(result.get("start_time"))
+                finish = (
+                    start + timedelta(seconds=int(result["duration"]))
+                    if start and result.get("duration")
+                    else None
+                )
+                p.quotes = [
+                    Quote.from_dict(q)
+                    for q in attached
+                    if finish and timestamp(q["observed_at"]) <= finish
+                ]
+            await self.complete_price_history(p, result)
             delivery = self.store.begin_delivery(
                 row["id"], "result", row["destination"], row["destination_topic_id"]
             )
             if not delivery:
                 continue
-            p = self.saved_prediction(row["payload"])
             try:
                 msg = await self.bot.send_message(
                     row["destination"],
@@ -706,10 +768,41 @@ class Service:
                 p.draft.map_number
                 and 0 <= (utcnow() - p.draft.observed_at).total_seconds() <= 6 * 3600
             ):
-                self.store.save_quotes(p.draft.match_id, await self.collect_quotes(p.draft))
+                quotes = await self.collect_quotes(p.draft)
+                self.store.save_quotes(p.draft.match_id, quotes)
+                if not p.quotes and quotes:
+                    await self.attach_missing_quotes(row["id"], p, quotes)
                 tracked += 1
                 if tracked >= 8:
                     break
+
+    async def attach_missing_quotes(self, forecast_id, p, quotes):
+        if not self.bot or self.paused:
+            return
+        displayed = replace(p, quotes=quotes)
+        if not market_snapshot(displayed, self.settings.quote_max_age_seconds)[0]:
+            return
+        image = render_card(displayed, self.heroes, self.assets)
+        for target in self.store.publications(forecast_id):
+            key = f"quote_attached:{forecast_id}:{target['destination']}"
+            if not self.destination_enabled(target["destination"]) or self.store.get(key):
+                continue
+            try:
+                from aiogram.types import InputMediaPhoto
+
+                await self.bot.edit_message_media(
+                    chat_id=target["destination"],
+                    message_id=target["post_id"],
+                    media=InputMediaPhoto(
+                        media=BufferedInputFile(image, filename="draft.png"),
+                        caption=caption(
+                            displayed, self.settings.quote_max_age_seconds, self.heroes
+                        ),
+                    ),
+                )
+                self.store.set(key, [q.to_dict() for q in quotes])
+            except TelegramAPIError as exc:
+                self.store.health("Обновление котировок", False, type(exc).__name__)
 
     async def reports(self):
         if not self.bot or not self.destinations or not self.automatic or self.paused:
@@ -718,6 +811,55 @@ class Service:
             if not self.paused and target["chat_id"] in {t["chat_id"] for t in self.destinations}:
                 await self.reports_for(target)
                 await self.reports_for(target, late_analysis=True)
+
+    async def morning_brief(self):
+        from .brief import brief_caption, scheduled_series
+        from .reports import report_payload
+
+        now = utcnow().astimezone(MOSCOW)
+        hour = self.store.get("morning_brief_hour", self.settings.morning_brief_hour)
+        if (
+            now.hour != hour
+            or not self.bot
+            or self.paused
+            or not self.automatic
+            or not self.store.get("morning_brief_enabled", self.settings.morning_brief_enabled)
+        ):
+            return
+        period = f"brief:{now.date()}"
+        targets = [
+            t
+            for t in self.destinations
+            if self.store.report_state(period, t["chat_id"]) in (None, "failed")
+        ]
+        if not targets:
+            return
+        rules = [
+            {
+                "league_id": row["id"],
+                "name": row["name"],
+                "keywords": self.market_keywords(row["id"], now),
+            }
+            for row in self.store.leagues(enabled_only=True)
+        ]
+        rules = [rule for rule in rules if rule["keywords"]]
+        if not rules:
+            return
+        try:
+            series = scheduled_series(await self.poly.discover(), rules, now)
+            if not series:
+                return
+            midnight = datetime.combine(now.date(), time.min, MOSCOW)
+            for target in targets:
+                since = (midnight - timedelta(days=1)).astimezone(utcnow().tzinfo).isoformat()
+                until = midnight.astimezone(utcnow().tzinfo).isoformat()
+                previous = report_payload(self.store, since, until, destination=target["chat_id"])
+                previous["late"] = report_payload(
+                    self.store, since, until, destination=target["chat_id"], late_analysis=True
+                )
+                await self.send_report(period, brief_caption(series, previous), target=target)
+        except Exception as exc:
+            self.store.health("Утренний анонс", False, type(exc).__name__)
 
     async def reports_for(self, target, late_analysis=False):
         now = utcnow().astimezone(MOSCOW)
@@ -852,6 +994,7 @@ class Service:
                     ):
                         await self.publish(identity)
             await self.track_market_prices()
+            await self.morning_brief()
             await self.reports()
 
     async def run(self):

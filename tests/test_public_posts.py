@@ -42,8 +42,9 @@ def test_public_post_is_short_and_uses_real_hero_statistics(prediction):
         p, heroes={33: {"localized_name": "Enigma"}, 54: {"localized_name": "Lifestealer"}}
     )
     assert "Бот за" in text and "карта 2" in text and "59%" in text and "★" in text
-    assert "Enigma против Lifestealer: 71%" in text
-    assert "80 карт" in text and "По одним героям ровно" in text
+    assert "Игроки сильнее, Enigma бьёт Lifestealer в 71% игр" in text
+    assert "80 карт" not in text and "По одним героям ровно" in text
+    assert "по истории" not in text and "Рейтинг" not in text
     assert "1.52" in text and "2.70" in text
     assert len(text) < 650 and len([line for line in text.splitlines() if line]) == 3
     assert all(
@@ -78,7 +79,7 @@ def test_result_uses_original_price_and_only_observed_in_game_extremes(predictio
     result = {"radiant_win": True, "start_time": int(now.timestamp()), "duration": 1800}
     text = result_text(p, result, snapshots)
     assert "Зашло" in text and "карту 2" in text and "кэф 1.52" in text
-    assert "по ходу до 2.04" in text and "99.00" not in text
+    assert "наблюдали до 2.04" in text and "99.00" not in text
     assert len(text.splitlines()) == 1
 
 

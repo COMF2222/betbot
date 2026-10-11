@@ -90,7 +90,9 @@ class FakeHTTP:
         ("v2", {"clobTokenIds": '["ctf0","ctf1"]', "positionIds": ["v20", "v21"]}, "v20"),
     ],
 )
-async def test_polymarket_uses_ask_and_correct_protocol_ids(draft, version, ids, expected):
+async def test_polymarket_uses_displayed_midpoint_and_correct_protocol_ids(
+    draft, version, ids, expected
+):
     http = FakeHTTP(
         {
             "asks": [{"price": "0.9", "size": "10"}, {"price": "0.5", "size": "20"}],
@@ -116,7 +118,9 @@ async def test_polymarket_uses_ask_and_correct_protocol_ids(draft, version, ids,
     assert http.calls[0][1]["token_id"] == expected
     assert len(quotes) == 2
     assert quotes[0].outcome == "dire"
-    assert quotes[0].odds == 2
+    assert quotes[0].odds == pytest.approx(1 / 0.45)
+    assert quotes[0].ask_odds == 2
+    assert quotes[0].price_kind == "market"
     assert quotes[0].liquidity == 10
     assert quotes[0].gross
 
@@ -155,7 +159,7 @@ async def test_verified_aliases_match_the_exact_map_without_swapping_sides(draft
     }
     assert Polymarket.find_event(raw, [event]) is None
     assert Polymarket.find_event(raw, [event], aliases) == event
-    http = FakeHTTP({"asks": [{"price": "0.5", "size": "20"}]})
+    http = FakeHTTP({"asks": [{"price": "0.5", "size": "20"}], "last_trade_price": "0.5"})
     quotes = await Polymarket(http).quotes(raw, event, aliases)
     assert [q.outcome for q in quotes] == ["dire", "radiant"]
     assert all(q.map_number == 2 and q.match_id == raw.match_id for q in quotes)

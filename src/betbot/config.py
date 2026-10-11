@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     min_favorite_probability: float = 0.55
     publish_all_maps: bool = True
     allow_delayed_analysis: bool = True
+    morning_brief_enabled: bool = True
+    morning_brief_hour: int = 10
     quote_max_age_seconds: int = 30
     opendota_api_key: str = ""
     steam_api_key: str = ""
@@ -32,6 +34,13 @@ class Settings(BaseSettings):
     oddspapi_base_url: str = "https://api.oddspapi.io/v4"
     odds_feed_url: str = ""
     odds_feed_api_key: str = ""
+
+    @field_validator("morning_brief_hour")
+    @classmethod
+    def brief_hour(cls, value):
+        if not 0 <= value <= 23:
+            raise ValueError("Час анонса должен быть от 0 до 23")
+        return value
 
     @field_validator(
         "poll_seconds",

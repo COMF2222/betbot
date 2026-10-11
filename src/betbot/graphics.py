@@ -290,10 +290,14 @@ def forecast_image(p, heroes=None, assets=None, demo=False):
     source = "Polymarket" if "Polymarket" in groups else next(iter(groups), None)
     if source:
         quotes = groups[source]
+        quote_time = max(q.observed_at for q in quotes.values())
+        label = "ЦЕНЫ В МОМЕНТ ПРОГНОЗА"
+        if (quote_time - p.draft.observed_at).total_seconds() > 30:
+            label = f"ЦЕНЫ НА {quote_time.astimezone(MOSCOW):%H:%M МСК} / ПОЗЖЕ ПРОГНОЗА"
         c.text(
             80,
             719,
-            source.upper() + " / ЦЕНЫ В МОМЕНТ ПРОГНОЗА",
+            source.upper() + " / " + label,
             12,
             MUTED,
             True,
