@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "name": "round-3-tier1-domain-2026-10-11",
+  "seed": 42,
+  "primary_metric": "brier",
+  "development_prefixes": [0.7, 1.0],
+  "development_scope_path": "tier1-training-2025-2026.json",
+  "training_scope_path": "tier1-training-2025-2026.json",
+  "minimum_brier_improvement": 0.0005,
+  "selection": "Lowest mean development Tier 1 Brier, accuracy no worse in aggregate and Brier no worse in either chronological fold",
+  "promotion": "No automatic promotion; four-month retrospective comparison cannot replace a fresh prospective check",
+  "candidates": [
+    {"name": "baseline", "kind": "linear", "features": "classic", "C": 0.15, "hypothesis": "Control with the original global training and calibration"},
+    {"name": "tier1_calibration", "kind": "linear", "features": "classic", "C": 0.15, "target_calibration": true, "hypothesis": "Calibrate scores on earlier main Tier 1 games instead of small leagues"},
+    {"name": "tier1_weight_4", "kind": "linear", "features": "classic", "C": 0.15, "tier_multiplier": 4, "hypothesis": "Raise the influence of verified top-level main-event maps during fitting"},
+    {"name": "tier1_weight_12_calibrated", "kind": "linear", "features": "classic", "C": 0.15, "tier_multiplier": 12, "target_calibration": true, "hypothesis": "Emphasize top-level examples in both weights and probability calibration"},
+    {"name": "tier1_only", "kind": "linear", "features": "classic", "C": 0.15, "target_training": true, "target_calibration": true, "hypothesis": "Exclude lower-level maps from fitting while preserving causal player history"},
+    {"name": "tier1_role_interactions", "kind": "linear", "features": "interactions", "C": 0.15, "tier_multiplier": 4, "target_calibration": true, "hypothesis": "Learn role and experience interactions specifically for top-level games"},
+    {"name": "tier1_nonlinear", "kind": "hist_gradient", "features": "compact", "tier_multiplier": 4, "target_calibration": true, "max_depth": 3, "max_leaf_nodes": 8, "min_samples_leaf": 80, "max_iter": 150, "hypothesis": "Change the target domain of nonlinear training and calibration to top-level play"}
+  ],
+  "excluded_previous_ideas": ["Unweighted nonlinear_deeper rejected after round 2", "No retuning of round-2 candidates on four-month outcomes"],
+  "guardrails": ["All temporal and series boundaries retained", "Verified league IDs AND date windows required", "Development selection restricted to earlier Tier 1 main maps", "Four-month scoring uses unchanged 442-map scope", "No model replacement or publications during experiments"]
+}

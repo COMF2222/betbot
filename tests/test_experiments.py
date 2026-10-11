@@ -7,6 +7,7 @@ from test_model import history_rows
 
 from betbot.experiments import (
     build_examples,
+    candidate_partition,
     feature_view,
     fit_candidate,
     research_features,
@@ -118,3 +119,57 @@ def test_selection_requires_stable_probability_gain_without_accuracy_loss():
     assert select_candidate(records, plan) == "improved"
     records["improved"] = [result(0.24, 60), result(0.23, 60)]
     assert select_candidate(records, plan) is None
+
+
+def test_target_scope_checks_league_and_date_without_expanding_temporal_partition():
+    from betbot.domain import timestamp
+
+    rows = history_rows(300)
+    split = chronological_split(rows)
+    scope = {
+        "events": [
+            {
+                "league_id": 123,
+                "start_date": timestamp(rows[0]["start_time"]).date().isoformat(),
+                "end_date": timestamp(rows[-1]["start_time"]).date().isoformat(),
+            }
+        ]
+    }
+    rows[split[0][0]]["leagueid"] = 999  # Qualifier with another league ID.
+    rows[split[0][1]]["start_time"] -= 86400 * 365  # Reused ID, different edition.
+    candidate = {"target_training": True, "target_calibration": True}
+    train, calibration = candidate_partition(candidate, rows, split, scope)
+    assert train == split[0][2:] and calibration == split[1]
+    assert not set(train + calibration) & set(split[2])
+    with pytest.raises(ValueError, match="verified target scope"):
+        candidate_partition(candidate, rows, split)
+
+
+def test_tier_weighting_and_calibration_still_ignore_future_targets():
+    from betbot.domain import timestamp
+
+    rows = history_rows(300)
+    features = build_examples(rows)
+    split = chronological_split(rows)
+    scope = {
+        "events": [
+            {
+                "league_id": 123,
+                "start_date": timestamp(rows[0]["start_time"]).date().isoformat(),
+                "end_date": timestamp(rows[-1]["start_time"]).date().isoformat(),
+            }
+        ]
+    }
+    candidate = {
+        "kind": "linear",
+        "features": "classic",
+        "C": 0.15,
+        "tier_multiplier": 4,
+        "target_calibration": True,
+    }
+    original = fit_candidate(candidate, rows, features, split, split[2], scope)
+    for i in split[2]:
+        rows[i]["radiant_win"] = not rows[i]["radiant_win"]
+    assert fit_candidate(candidate, rows, features, split, split[2], scope) == pytest.approx(
+        original
+    )

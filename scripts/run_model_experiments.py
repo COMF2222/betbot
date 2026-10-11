@@ -12,6 +12,7 @@ def main():
         "--plan", type=Path, default=Path("config/model-experiments-2026-10-11.json")
     )
     parser.add_argument("--output", type=Path, default=Path("artifacts/model-research-2026-10-11"))
+    parser.add_argument("--features-cache", type=Path)
     args = parser.parse_args()
     run_experiments(
         args.input,
@@ -19,6 +20,7 @@ def main():
         args.plan,
         args.output,
         progress=lambda text: print(text, flush=True),
+        feature_cache=args.features_cache,
     )
 
 

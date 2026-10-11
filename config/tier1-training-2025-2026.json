@@ -1,0 +1,18 @@
+{
+  "tier": 1,
+  "classification": "Verified subset of Liquipedia Tier 1 main events; not an exhaustive list",
+  "verified_at": "2026-10-11",
+  "events": [
+    {"league_id": 18920, "name": "PGL Wallachia Season 6", "start_date": "2025-11-15", "end_date": "2025-11-23", "source": "https://liquipedia.net/dota2/PGL/Wallachia/6", "classification_source": "https://liquipedia.net/dota2/ODPixel/Broadcasts"},
+    {"league_id": 17420, "name": "BLAST SLAM V", "start_date": "2025-11-25", "end_date": "2025-12-07", "source": "https://liquipedia.net/dota2/BLAST/SLAM/5"},
+    {"league_id": 18988, "name": "DreamLeague Season 27", "start_date": "2025-12-10", "end_date": "2025-12-21", "source": "https://liquipedia.net/dota2/DreamLeague/27", "classification_source": "https://liquipedia.net/dota2/ODPixel/Broadcasts"},
+    {"league_id": 19099, "name": "BLAST SLAM VI", "start_date": "2026-02-03", "end_date": "2026-02-15", "source": "https://liquipedia.net/dota2/BLAST/Slam/6"},
+    {"league_id": 19269, "name": "DreamLeague Season 28", "start_date": "2026-02-16", "end_date": "2026-03-01", "source": "https://liquipedia.net/dota2/DreamLeague/28", "classification_source": "https://liquipedia.net/dota2/Nightfall/Results"},
+    {"league_id": 19435, "name": "PGL Wallachia Season 7", "start_date": "2026-03-07", "end_date": "2026-03-15", "source": "https://liquipedia.net/dota2/PGL/Wallachia/7"},
+    {"league_id": 19422, "name": "ESL One Birmingham 2026", "start_date": "2026-03-22", "end_date": "2026-03-29", "source": "https://liquipedia.net/dota2/ESL_One/Birmingham/2026", "classification_source": "https://liquipedia.net/dota2/Totus/Broadcasts"},
+    {"league_id": 19543, "name": "PGL Wallachia Season 8", "start_date": "2026-04-18", "end_date": "2026-04-26", "source": "https://liquipedia.net/dota2/PGL/Wallachia/8"},
+    {"league_id": 19696, "name": "DreamLeague Season 29", "start_date": "2026-05-13", "end_date": "2026-05-24", "source": "https://liquipedia.net/dota2/DreamLeague/29"},
+    {"league_id": 19101, "name": "BLAST SLAM VII", "start_date": "2026-05-26", "end_date": "2026-06-07", "source": "https://liquipedia.net/dota2/BLAST/SLAM/7", "classification_source": "https://liquipedia.net/dota2/Totus/Broadcasts"}
+  ],
+  "notes": ["Qualifiers and Division 2 events excluded", "IDs checked against the local Steam league catalog and match date ranges", "Only the verified list is weighted or scored; other Tier 1 events may be absent from the list"]
+}

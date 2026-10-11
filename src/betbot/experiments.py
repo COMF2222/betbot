@@ -123,14 +123,34 @@ def training_weights(rows, indices, half_life_days=None):
     return values / values.mean()
 
 
-def fit_candidate(candidate, rows, features, split, predict_indices):
+def candidate_partition(candidate, rows, split, target_scope=None):
+    from .backtest import score_event
+
+    train, calibration, _ = split
+    if (
+        any(candidate.get(k) for k in ("target_training", "target_calibration", "tier_multiplier"))
+        and not target_scope
+    ):
+        raise ValueError("A verified target scope is required for domain experiments")
+    if candidate.get("target_training"):
+        train = [i for i in train if score_event(rows[i], target_scope)]
+    if candidate.get("target_calibration"):
+        calibration = [i for i in calibration if score_event(rows[i], target_scope)]
+    if len(train) < 100 or len(calibration) < 50:
+        raise ValueError("Insufficient earlier maps for training or calibration")
+    return train, calibration
+
+
+def fit_candidate(candidate, rows, features, split, predict_indices, target_scope=None):
     from scipy.sparse import vstack
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.feature_extraction import DictVectorizer
     from sklearn.linear_model import LogisticRegression
     from threadpoolctl import threadpool_limits
 
-    train, calibration, _ = split
+    from .backtest import score_event
+
+    train, calibration = candidate_partition(candidate, rows, split, target_scope)
     view = candidate["features"]
     vectorizer = DictVectorizer(sparse=candidate["kind"] == "linear")
     train_features = [feature_view(features[i], view) for i in train]
@@ -138,6 +158,14 @@ def fit_candidate(candidate, rows, features, split, predict_indices):
     y = np.asarray([int(row["radiant_win"]) for row in rows])
     train_y = y[train]
     weights = training_weights(rows, train, candidate.get("half_life_days"))
+    if candidate.get("tier_multiplier"):
+        weights *= np.asarray(
+            [
+                candidate["tier_multiplier"] if score_event(rows[i], target_scope) else 1
+                for i in train
+            ]
+        )
+        weights /= weights.mean()
     if candidate.get("mirror"):
         other = vectorizer.transform([swap_features(row) for row in train_features])
         x, train_y, weights = (
@@ -253,7 +281,12 @@ def save_predictions(path, rows, indices, probabilities):
 
 
 def run_experiments(
-    input_path: Path, baseline_dir: Path, plan_path: Path, output: Path, progress=print
+    input_path: Path,
+    baseline_dir: Path,
+    plan_path: Path,
+    output: Path,
+    progress=print,
+    feature_cache=None,
 ):
     from .backtest import score_event
 
@@ -262,6 +295,15 @@ def run_experiments(
 
     output.mkdir(parents=True, exist_ok=True)
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
+
+    def scope(name):
+        return (
+            json.loads((plan_path.parent / plan[name]).read_text(encoding="utf-8"))
+            if plan.get(name)
+            else None
+        )
+
+    development_scope, target_scope = scope("development_scope_path"), scope("training_scope_path")
     data = input_path.read_bytes()
     baseline = json.loads((baseline_dir / "report.json").read_text(encoding="utf-8"))
     raw = json.loads(data)
@@ -289,27 +331,66 @@ def run_experiments(
     protocol = {
         "plan": plan,
         "plan_sha256": hashlib.sha256(plan_path.read_bytes()).hexdigest(),
+        "implementation_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "data_sha256": hashlib.sha256(data).hexdigest(),
         "history_maps_before_period": before_count,
         "requested_start": baseline["requested_start"],
         "requested_end": baseline["requested_end"],
         "heldout_scope": baseline["evaluation_scope"],
+        "development_scope": development_scope,
+        "training_scope": target_scope,
         "holdout_already_examined_in_previous_work": True,
     }
+    previous_protocol = output / "protocol.json"
+    if previous_protocol.exists():
+        previous = json.loads(previous_protocol.read_text(encoding="utf-8"))
+        if any(
+            previous.get(k) != protocol.get(k)
+            for k in (
+                "plan_sha256",
+                "implementation_sha256",
+                "data_sha256",
+                "development_scope",
+                "training_scope",
+            )
+        ):
+            raise ValueError(
+                "This output already contains a different experiment; use a new directory"
+            )
+        if (output / "comparison.json").exists():
+            emit({"cached_completed_experiment": str(output)})
+            return json.loads((output / "comparison.json").read_text(encoding="utf-8"))
     (output / "protocol.json").write_text(
         json.dumps(protocol, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     # No candidate sees outcomes for the current map while these inputs are built.
-    with (output / "blind-features.jsonl").open("w", encoding="utf-8") as stream:
-        features = build_examples(rows, stream, emit)
+    if feature_cache:
+        cached_protocol = json.loads(
+            (feature_cache.parent / "protocol.json").read_text(encoding="utf-8")
+        )
+        if cached_protocol["data_sha256"] != protocol["data_sha256"]:
+            raise ValueError("Feature cache uses a different input history")
+        cached = [
+            json.loads(line) for line in feature_cache.read_text(encoding="utf-8").splitlines()
+        ]
+        assert len(cached) == len(rows)
+        assert all(
+            str(item["match_id"]) == str(row["match_id"])
+            for item, row in zip(cached, rows, strict=True)
+        )
+        features = [item["features"] for item in cached]
+        emit({"features_reused": len(features)})
+    else:
+        with (output / "blind-features.jsonl").open("w", encoding="utf-8") as stream:
+            features = build_examples(rows, stream, emit)
     records = {c["name"]: [] for c in plan["candidates"]}
     for fold, prefix in enumerate(plan["development_prefixes"]):
         count = int(before_count * prefix)
         split = chronological_split(rows[:count])
-        test = split[2]
+        test = [i for i in split[2] if score_event(rows[i], development_scope)]
         actual = np.asarray([int(rows[i]["radiant_win"]) for i in test])
         for candidate in plan["candidates"]:
-            probabilities = fit_candidate(candidate, rows, features, split, test)
+            probabilities = fit_candidate(candidate, rows, features, split, test, target_scope)
             # Save forecasts before combining them with held-out targets in a report.
             save_predictions(
                 output / f"development-{fold}-{candidate['name']}.csv", rows, test, probabilities
@@ -319,6 +400,10 @@ def run_experiments(
                 "test_start": rows[test[0]]["start_time"],
                 "test_end": rows[test[-1]]["start_time"],
                 **probability_metrics(actual, probabilities),
+                "training_maps": len(candidate_partition(candidate, rows, split, target_scope)[0]),
+                "calibration_maps": len(
+                    candidate_partition(candidate, rows, split, target_scope)[1]
+                ),
             }
             records[candidate["name"]].append(result)
             (output / "development.json").write_text(
@@ -345,7 +430,9 @@ def run_experiments(
         predictions = {}
         for name in ("baseline", selected):
             candidate = next(c for c in plan["candidates"] if c["name"] == name)
-            probabilities = fit_candidate(candidate, rows, features, final_split, indices)
+            probabilities = fit_candidate(
+                candidate, rows, features, final_split, indices, target_scope
+            )
             save_predictions(output / f"tier1-{name}.csv", rows, indices, probabilities)
             predictions[name] = probabilities
         actual = np.asarray([int(rows[i]["radiant_win"]) for i in indices])
