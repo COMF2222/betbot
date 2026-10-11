@@ -6,19 +6,58 @@
       "source": "historical OpenDota",
       "match_id": 8885183102,
       "pick_ban_entries": 24,
-      "hero_variant_known": 10
+      "hero_variant_field_present": 10,
+      "hero_variant_values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "hero_variants_confirmed": 0
     },
     {
       "source": "historical OpenDota",
       "match_id": 8885195787,
       "pick_ban_entries": 24,
-      "hero_variant_known": 10
+      "hero_variant_field_present": 10,
+      "hero_variant_values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "hero_variants_confirmed": 0
     },
     {
       "source": "historical OpenDota",
       "match_id": 8885195986,
       "pick_ban_entries": 24,
-      "hero_variant_known": 10
+      "hero_variant_field_present": 10,
+      "hero_variant_values": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "hero_variants_confirmed": 0
     },
     {
       "source": "Steam Top",
@@ -144,7 +183,8 @@
   "live_model_changed": false,
   "limitations": [
     "Live field availability is verified for this snapshot only",
-    "A known historical field does not prove availability at live forecast time",
+    "A historical field does not prove availability or a meaningful value at live forecast time",
+    "All sampled historical hero_variant values are zero: a concrete selected facet is not confirmed",
     "No current or future match result is supplied to research predictors"
   ],
   "official_sources": [
