@@ -13,6 +13,7 @@ def main():
     )
     parser.add_argument("--output", type=Path, default=Path("artifacts/model-research-2026-10-11"))
     parser.add_argument("--features-cache", type=Path)
+    parser.add_argument("--group", help="Run only a preregistered group in a multi-group plan")
     args = parser.parse_args()
     run_experiments(
         args.input,
@@ -21,6 +22,7 @@ def main():
         args.output,
         progress=lambda text: print(text, flush=True),
         feature_cache=args.features_cache,
+        group=args.group,
     )
 
 

@@ -249,11 +249,15 @@ def test_completed_experiment_is_reused_but_changed_protocol_cannot_overwrite_it
     }
     (baseline_dir / "report.json").write_text(json.dumps(baseline), encoding="utf-8")
     protocol = {
+        "plan": {"name": "test", "candidates": [], "development_prefixes": [1]},
         "plan_sha256": hashlib.sha256(plan_path.read_bytes()).hexdigest(),
         "implementation_sha256": hashlib.sha256(
             Path(experiments.__file__).read_bytes()
         ).hexdigest(),
         "data_sha256": hashlib.sha256(input_path.read_bytes()).hexdigest(),
+        "estimator_implementation_sha256": hashlib.sha256(
+            Path(experiments.__file__).with_name("research_estimators.py").read_bytes()
+        ).hexdigest(),
     }
     (output / "protocol.json").write_text(json.dumps(protocol), encoding="utf-8")
     saved = '{"promoted": false, "selected_candidate": null}'

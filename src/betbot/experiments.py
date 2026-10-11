@@ -5,6 +5,7 @@ import hashlib
 import heapq
 import json
 import math
+import warnings
 from collections import defaultdict
 from pathlib import Path
 
@@ -69,11 +70,15 @@ def research_features(history: History, draft: Draft) -> dict[str, float]:
 
 
 def swap_features(features):
+    from .evidence import EVEN_EVIDENCE_FEATURES
     from .series_context import EVEN_SERIES_FEATURES
 
     return {
         key: value
-        if key.startswith("patch:") or key == "role_coverage" or key in EVEN_SERIES_FEATURES
+        if key.startswith("patch:")
+        or key == "role_coverage"
+        or key in EVEN_SERIES_FEATURES
+        or key in EVEN_EVIDENCE_FEATURES
         else -value
         for key, value in features.items()
     }
@@ -88,6 +93,10 @@ def feature_view(features, name):
     }
     if name == "classic":
         return base
+    from .evidence import EVIDENCE_VIEWS, evidence_view
+
+    if name in EVIDENCE_VIEWS:
+        return evidence_view(features, base, name)
     if name == "tier1_ratings":
         return {
             **base,
@@ -115,13 +124,26 @@ def feature_view(features, name):
         return {
             key: value
             for key, value in features.items()
-            if not key.startswith((*direct, "series:", "tier1:"))
+            if not key.startswith(
+                (*direct, "series:", "tier1:", "evidence:", "support_pair:", "triple:", "identity_")
+            )
         }
     if name == "compact":
         return {
             key: value
             for key, value in features.items()
-            if not key.startswith(("pair:", *direct, "series:", "tier1:"))
+            if not key.startswith(
+                (
+                    "pair:",
+                    *direct,
+                    "series:",
+                    "tier1:",
+                    "evidence:",
+                    "support_pair:",
+                    "triple:",
+                    "identity_",
+                )
+            )
         }
     raise ValueError(f"Unknown research feature view: {name}")
 
@@ -197,7 +219,7 @@ def earlier_partition(rows, indices, fraction):
     return train, calibration
 
 
-def candidate_partition(candidate, rows, split, target_scope=None):
+def candidate_partition(candidate, rows, split, target_scope=None, features=None):
     from .backtest import score_event
 
     train, calibration, _ = split
@@ -227,12 +249,22 @@ def candidate_partition(candidate, rows, split, target_scope=None):
     if candidate.get("exclude_calibration_leagues"):
         excluded = set(candidate["exclude_calibration_leagues"])
         calibration = [i for i in calibration if rows[i]["leagueid"] not in excluded]
+    if candidate.get("roster_stable_training"):
+        if features is None:
+            raise ValueError("Causal roster metadata is required")
+        train = [
+            i
+            for i in train
+            if features[i]["evidence:roster_min"] >= candidate["roster_stable_training"]
+        ]
     if len(train) < 100 or len(calibration) < 50:
         raise ValueError("Insufficient earlier maps for training or calibration")
     return train, calibration
 
 
-def fit_candidate(candidate, rows, features, split, predict_indices, target_scope=None):
+def fit_candidate(
+    candidate, rows, features, split, predict_indices, target_scope=None, diagnostics=None
+):
     if candidate.get("monthly_update"):
         from .presentation import MOSCOW
 
@@ -276,21 +308,24 @@ def fit_candidate(candidate, rows, features, split, predict_indices, target_scop
         ]
         return np.average(predictions, axis=0, weights=weights)
     from scipy.sparse import vstack
-    from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.feature_extraction import DictVectorizer
     from sklearn.linear_model import LogisticRegression
     from threadpoolctl import threadpool_limits
 
     from .backtest import score_event
+    from .research_estimators import balance_weights, estimator_for, raw_scores
 
-    train, calibration = candidate_partition(candidate, rows, split, target_scope)
+    train, calibration = candidate_partition(candidate, rows, split, target_scope, features)
     view = candidate["features"]
-    vectorizer = DictVectorizer(sparse=candidate["kind"] == "linear")
+    vectorizer = DictVectorizer(
+        sparse=candidate["kind"] in ("linear", "elastic", "spline", "offset")
+    )
     train_features = [feature_view(features[i], view) for i in train]
     x = vectorizer.fit_transform(train_features)
     y = np.asarray([int(row["radiant_win"]) for row in rows])
     train_y = y[train]
     weights = training_weights(rows, train, candidate.get("half_life_days"))
+    weights = balance_weights(rows, train, weights, candidate.get("sample_balance"))
     if candidate.get("tier_multiplier"):
         weights *= np.asarray(
             [
@@ -306,34 +341,44 @@ def fit_candidate(candidate, rows, features, split, predict_indices, target_scop
             np.concatenate((train_y, 1 - train_y)),
             np.concatenate((weights, weights)) / 2,
         )
-    if candidate["kind"] == "linear":
-        estimator = LogisticRegression(C=candidate["C"], max_iter=1500, random_state=42)
-    else:
-        estimator = HistGradientBoostingClassifier(
-            learning_rate=0.05,
-            l2_regularization=20,
-            early_stopping=False,
-            random_state=42,
-            **{
-                k: candidate[k]
-                for k in ("max_depth", "max_leaf_nodes", "min_samples_leaf", "max_iter")
-            },
-        )
+    estimator, fitting = estimator_for(candidate, vectorizer.get_feature_names_out())
     with threadpool_limits(limits=1):
-        estimator.fit(x, train_y, sample_weight=weights)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            estimator.fit(
+                x, train_y, **{fitting.get("sample_weight_parameter", "sample_weight"): weights}
+            )
+        if diagnostics is not None:
+            diagnostics["fit_warnings"] = [str(w.message) for w in caught]
 
         def calibration_inputs(indices):
-            scores = estimator.decision_function(
-                vectorizer.transform([feature_view(features[i], view) for i in indices])
+            scores = raw_scores(
+                estimator, vectorizer.transform([feature_view(features[i], view) for i in indices])
             )
             mode = candidate.get("calibration", "combined")
-            if mode not in ("combined", "score_only", "team", "player", "raw"):
+            if mode not in ("combined", "score_only", "team", "player", "raw", "pooled_tier1"):
                 raise ValueError("Unknown calibration mode")
             columns = [scores]
-            if mode in ("combined", "team"):
-                columns.append([features[i]["team_elo"] * math.log(10) for i in indices])
-            if mode in ("combined", "player"):
-                columns.append([features[i]["player_elo"] for i in indices])
+            calibration_features = [
+                feature_view(features[i], view)
+                if candidate.get("calibration_ratings") == "view"
+                else features[i]
+                for i in indices
+            ]
+            if mode in ("combined", "team", "pooled_tier1"):
+                columns.append([f["team_elo"] * math.log(10) for f in calibration_features])
+            if mode in ("combined", "player", "pooled_tier1"):
+                columns.append([f["player_elo"] for f in calibration_features])
+            if mode == "pooled_tier1":
+                flag = np.asarray([features[i]["evidence:tier1"] for i in indices])
+                columns.extend(
+                    (
+                        flag,
+                        flag * scores,
+                        flag * np.asarray(columns[1]),
+                        flag * np.asarray(columns[2]),
+                    )
+                )
             return np.column_stack(columns)
 
         if candidate.get("calibration") == "raw":
@@ -341,7 +386,11 @@ def fit_candidate(candidate, rows, features, split, predict_indices, target_scop
                 vectorizer.transform([feature_view(features[i], view) for i in predict_indices])
             )[:, 1]
 
-        calibrated = LogisticRegression(C=1.0, random_state=42)
+        calibrated = LogisticRegression(
+            C=0.2 if candidate.get("calibration") == "pooled_tier1" else 1.0,
+            random_state=42,
+            max_iter=1500 if candidate.get("calibration") == "pooled_tier1" else 100,
+        )
         calibrated.fit(calibration_inputs(calibration), y[calibration])
         return calibrated.predict_proba(calibration_inputs(predict_indices))[:, 1]
 
@@ -386,6 +435,8 @@ def select_candidate(records, plan):
     eligible = []
     for name in names:
         values = records[name]
+        if plan.get("require_convergence") and any(r.get("fit_warnings") for r in values):
+            continue
         mean_brier = np.mean([r["brier"] for r in values])
         improvement = np.mean([r["brier"] for r in baseline]) - mean_brier
         stable = all(r["brier"] <= old["brier"] for r, old in zip(values, baseline, strict=True))
@@ -442,6 +493,7 @@ def run_experiments(
     output: Path,
     progress=print,
     feature_cache=None,
+    group=None,
 ):
     from .backtest import score_event
 
@@ -450,6 +502,13 @@ def run_experiments(
 
     output.mkdir(parents=True, exist_ok=True)
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    if group:
+        if group not in {c.get("group") for c in plan["candidates"]}:
+            raise ValueError("Unknown preregistered candidate group")
+        plan["candidates"] = [
+            c for c in plan["candidates"] if c["name"] == "baseline" or c.get("group") == group
+        ]
+        plan["requested_group"] = group
 
     def scope(name):
         return (
@@ -495,7 +554,14 @@ def run_experiments(
         "development_scope": development_scope,
         "training_scope": target_scope,
         "holdout_already_examined_in_previous_work": True,
+        "estimator_implementation_sha256": hashlib.sha256(
+            Path(__file__).with_name("research_estimators.py").read_bytes()
+        ).hexdigest(),
     }
+    if plan.get("evidence_features"):
+        protocol["evidence_implementation_sha256"] = hashlib.sha256(
+            Path(__file__).with_name("evidence.py").read_bytes()
+        ).hexdigest()
     if plan.get("series_context"):
         protocol["series_implementation_sha256"] = hashlib.sha256(
             Path(__file__).with_name("series_context.py").read_bytes()
@@ -522,6 +588,9 @@ def run_experiments(
                 "series_implementation_sha256",
                 "target_implementation_sha256",
                 "feature_cache_sha256",
+                "estimator_implementation_sha256",
+                "evidence_implementation_sha256",
+                "plan",
             )
         ):
             raise ValueError(
@@ -593,6 +662,26 @@ def run_experiments(
                     + "\n"
                 )
         emit({"tier1_rating_features": len(features)})
+    if plan.get("evidence_features"):
+        from .evidence import augment_evidence_features
+
+        combined_scope = {
+            "events": (target_scope or {}).get("events", [])
+            + (baseline["evaluation_scope"] or {}).get("events", [])
+        }
+        features = augment_evidence_features(rows, features, combined_scope, emit)
+        with (output / "blind-evidence-features.jsonl").open("w", encoding="utf-8") as stream:
+            for row, values in zip(rows, features, strict=True):
+                stream.write(
+                    json.dumps(
+                        {
+                            "match_id": str(row["match_id"]),
+                            "observed_at": timestamp(row["start_time"]).isoformat(),
+                            "features": values,
+                        }
+                    )
+                    + "\n"
+                )
     records = {c["name"]: [] for c in plan["candidates"]}
     for fold, prefix in enumerate(plan["development_prefixes"]):
         count = int(before_count * prefix)
@@ -600,7 +689,10 @@ def run_experiments(
         test = [i for i in split[2] if score_event(rows[i], development_scope)]
         actual = np.asarray([int(rows[i]["radiant_win"]) for i in test])
         for candidate in plan["candidates"]:
-            probabilities = fit_candidate(candidate, rows, features, split, test, target_scope)
+            diagnostics = {}
+            probabilities = fit_candidate(
+                candidate, rows, features, split, test, target_scope, diagnostics=diagnostics
+            )
             # Save forecasts before combining them with held-out targets in a report.
             save_predictions(
                 output / f"development-{fold}-{candidate['name']}.csv", rows, test, probabilities
@@ -610,9 +702,12 @@ def run_experiments(
                 "test_start": rows[test[0]]["start_time"],
                 "test_end": rows[test[-1]]["start_time"],
                 **probability_metrics(actual, probabilities),
-                "training_maps": len(candidate_partition(candidate, rows, split, target_scope)[0]),
+                **diagnostics,
+                "training_maps": len(
+                    candidate_partition(candidate, rows, split, target_scope, features)[0]
+                ),
                 "calibration_maps": len(
-                    candidate_partition(candidate, rows, split, target_scope)[1]
+                    candidate_partition(candidate, rows, split, target_scope, features)[1]
                 ),
             }
             records[candidate["name"]].append(result)
@@ -638,10 +733,18 @@ def run_experiments(
             if score_event(rows[i], baseline["evaluation_scope"])
         ]
         predictions = {}
+        final_diagnostics = {}
         for name in ("baseline", selected):
             candidate = next(c for c in plan["candidates"] if c["name"] == name)
+            final_diagnostics[name] = {}
             probabilities = fit_candidate(
-                candidate, rows, features, final_split, indices, target_scope
+                candidate,
+                rows,
+                features,
+                final_split,
+                indices,
+                target_scope,
+                diagnostics=final_diagnostics[name],
             )
             save_predictions(output / f"tier1-{name}.csv", rows, indices, probabilities)
             predictions[name] = probabilities
@@ -660,6 +763,7 @@ def run_experiments(
         final = {
             "baseline": probability_metrics(actual, predictions["baseline"]),
             "candidate": probability_metrics(actual, predictions[selected]),
+            "fit_diagnostics": final_diagnostics,
             **grouped_interval(
                 [rows[i] for i in indices], actual, predictions["baseline"], predictions[selected]
             ),
