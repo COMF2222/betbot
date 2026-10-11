@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "name": "round-7-winner-accuracy-and-calibration-2026-10-11",
+  "seed": 42,
+  "primary_metric": "accuracy",
+  "development_prefixes": [0.7, 1.0],
+  "development_scope_path": "tier1-training-2025-2026.json",
+  "minimum_accuracy_improvement": 0.005,
+  "maximum_brier_regression": 0.002,
+  "selection": "Winner accuracy is the primary research objective for this new round: improve by at least 0.5 percentage points in aggregate and do not regress in either earlier fold; Brier may worsen by at most 0.002 in either; choose highest accuracy, then lowest mean Brier",
+  "promotion": "No automatic promotion; the already examined June-October period is only retrospective evidence; require separately collected future maps before claiming verified improvement",
+  "candidates": [
+    {"name": "baseline", "kind": "linear", "features": "classic", "C": 0.15},
+    {"name": "fresh_75_accuracy_recheck", "kind": "linear", "features": "classic", "C": 0.15, "earlier_training_fraction": 0.9375, "previously_examined": "round-5 more_recent_weights_75; exact same recipe, new preregistered accuracy objective; not counted as a new unique variant", "hypothesis": "The previously observed earlier accuracy gain warrants a transparent recheck under the user's winner-accuracy objective"},
+    {"name": "fresh_75_raw", "kind": "linear", "features": "classic", "C": 0.15, "earlier_training_fraction": 0.9375, "calibration": "raw", "hypothesis": "Post-fit recalibration may obscure draft signal; evaluate raw probabilities with a strict probability-loss guardrail"},
+    {"name": "fresh_75_score_calibration", "kind": "linear", "features": "classic", "C": 0.15, "earlier_training_fraction": 0.9375, "calibration": "score_only", "hypothesis": "Calibrate the entire draft score without independently adding team/player Elo a second time"},
+    {"name": "fresh_75_team_calibration", "kind": "linear", "features": "classic", "C": 0.15, "earlier_training_fraction": 0.9375, "calibration": "team", "hypothesis": "Team strength plus the draft score may be more reliable than overlapping team and player strength calibration"},
+    {"name": "fresh_75_player_calibration", "kind": "linear", "features": "classic", "C": 0.15, "earlier_training_fraction": 0.9375, "calibration": "player", "hypothesis": "Current-player strength plus draft score may be less sensitive to team-name and roster changes"}
+  ],
+  "guardrails": ["The prior round's Brier objective and outcomes are not retroactively changed", "Select only one candidate using earlier Tier 1 folds before examining June-October results", "Same temporal and series purges as the established baseline", "Current and future map outcomes never enter model fitting or calibration", "No selection of confidence thresholds using final outcomes", "Full final-map coverage remains unchanged"]
+}

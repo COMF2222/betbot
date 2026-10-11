@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "name": "round-6-within-series-context-2026-10-11",
+  "seed": 42,
+  "primary_metric": "brier",
+  "development_prefixes": [0.7, 1.0],
+  "development_scope_path": "tier1-training-2025-2026.json",
+  "minimum_brier_improvement": 0.0005,
+  "series_context": true,
+  "selection": "Same two earlier Tier 1 folds; no Brier regression in either, at least 0.0005 mean improvement, no aggregate accuracy regression; choose lowest mean Brier",
+  "promotion": "No automatic promotion; require separately collected future maps and confirmation that series identity is available at live publication time",
+  "candidates": [
+    {"name": "baseline", "kind": "linear", "features": "classic", "C": 0.15},
+    {"name": "series_score", "kind": "linear", "features": "series_basic", "C": 0.15, "hypothesis": "Earlier map winner and current known score add information beyond team and player Elo"},
+    {"name": "series_rosters_surprise", "kind": "linear", "features": "series_full", "C": 0.15, "hypothesis": "Roster continuity, repeating hero choices and earlier unexpected results help assess the next map"},
+    {"name": "series_recent_weights", "kind": "linear", "features": "series_full", "C": 0.15, "earlier_training_fraction": 0.9375, "hypothesis": "Fresh hero weights and series context complement each other"},
+    {"name": "series_nonlinear", "kind": "hist_gradient", "features": "series_compact", "max_depth": 3, "max_leaf_nodes": 8, "min_samples_leaf": 80, "max_iter": 150, "hypothesis": "The previous map result interacts with player strength and draft strength"}
+  ],
+  "guardrails": ["Exact league, series and team IDs required; never infer a series by team names or future maps", "Unknown series identity falls back to zero context", "Only maps completed more than 60 seconds before the next map may enter context", "No knowledge of eventual series length or winner", "48-hour maximum earlier-map age and no more than four previous maps", "All 442 final maps remain in the comparison", "The live model is never replaced by this script"]
+}

@@ -69,8 +69,12 @@ def research_features(history: History, draft: Draft) -> dict[str, float]:
 
 
 def swap_features(features):
+    from .series_context import EVEN_SERIES_FEATURES
+
     return {
-        key: value if key.startswith("patch:") or key == "role_coverage" else -value
+        key: value
+        if key.startswith("patch:") or key == "role_coverage" or key in EVEN_SERIES_FEATURES
+        else -value
         for key, value in features.items()
     }
 
@@ -84,6 +88,17 @@ def feature_view(features, name):
     }
     if name == "classic":
         return base
+    if name in ("series_basic", "series_full", "series_compact"):
+        from .series_context import BASIC_SERIES_FEATURES
+
+        context = {
+            key: value
+            for key, value in features.items()
+            if key.startswith("series:")
+            and (name != "series_basic" or key in BASIC_SERIES_FEATURES)
+        }
+        original = feature_view(features, "compact") if name == "series_compact" else base
+        return {**original, **context}
     direct = ("counter:", "mid_counter:", "lane_pair:")
     if name in ("counters", "role_counters"):
         prefixes = direct if name == "role_counters" else ("counter:",)
@@ -92,10 +107,16 @@ def feature_view(features, name):
             **{key: value for key, value in features.items() if key.startswith(prefixes)},
         }
     if name == "interactions":
-        return {key: value for key, value in features.items() if not key.startswith(direct)}
+        return {
+            key: value
+            for key, value in features.items()
+            if not key.startswith((*direct, "series:"))
+        }
     if name == "compact":
         return {
-            key: value for key, value in features.items() if not key.startswith(("pair:", *direct))
+            key: value
+            for key, value in features.items()
+            if not key.startswith(("pair:", *direct, "series:"))
         }
     raise ValueError(f"Unknown research feature view: {name}")
 
@@ -294,13 +315,20 @@ def fit_candidate(candidate, rows, features, split, predict_indices, target_scop
             scores = estimator.decision_function(
                 vectorizer.transform([feature_view(features[i], view) for i in indices])
             )
-            return np.column_stack(
-                (
-                    scores,
-                    [features[i]["team_elo"] * math.log(10) for i in indices],
-                    [features[i]["player_elo"] for i in indices],
-                )
-            )
+            mode = candidate.get("calibration", "combined")
+            if mode not in ("combined", "score_only", "team", "player", "raw"):
+                raise ValueError("Unknown calibration mode")
+            columns = [scores]
+            if mode in ("combined", "team"):
+                columns.append([features[i]["team_elo"] * math.log(10) for i in indices])
+            if mode in ("combined", "player"):
+                columns.append([features[i]["player_elo"] for i in indices])
+            return np.column_stack(columns)
+
+        if candidate.get("calibration") == "raw":
+            return estimator.predict_proba(
+                vectorizer.transform([feature_view(features[i], view) for i in predict_indices])
+            )[:, 1]
 
         calibrated = LogisticRegression(C=1.0, random_state=42)
         calibrated.fit(calibration_inputs(calibration), y[calibration])
@@ -352,13 +380,28 @@ def select_candidate(records, plan):
         stable = all(r["brier"] <= old["brier"] for r, old in zip(values, baseline, strict=True))
         accuracy = sum(r["wins"] for r in values) / sum(r["count"] for r in values)
         original_accuracy = sum(r["wins"] for r in baseline) / sum(r["count"] for r in baseline)
-        if (
+        if plan.get("primary_metric") == "accuracy":
+            accurate_in_each = all(
+                r["wins"] / r["count"] >= old["wins"] / old["count"]
+                for r, old in zip(values, baseline, strict=True)
+            )
+            probability_guard = all(
+                r["brier"] <= old["brier"] + plan["maximum_brier_regression"]
+                for r, old in zip(values, baseline, strict=True)
+            )
+            if (
+                accuracy - original_accuracy >= plan["minimum_accuracy_improvement"]
+                and accurate_in_each
+                and probability_guard
+            ):
+                eligible.append((-accuracy, mean_brier, name))
+        elif (
             improvement >= plan["minimum_brier_improvement"]
             and stable
             and accuracy >= original_accuracy
         ):
             eligible.append((mean_brier, name))
-    return min(eligible)[1] if eligible else None
+    return min(eligible)[-1] if eligible else None
 
 
 def save_predictions(path, rows, indices, probabilities):
@@ -442,6 +485,12 @@ def run_experiments(
         "training_scope": target_scope,
         "holdout_already_examined_in_previous_work": True,
     }
+    if plan.get("series_context"):
+        protocol["series_implementation_sha256"] = hashlib.sha256(
+            Path(__file__).with_name("series_context.py").read_bytes()
+        ).hexdigest()
+    if feature_cache:
+        protocol["feature_cache_sha256"] = hashlib.sha256(feature_cache.read_bytes()).hexdigest()
     previous_protocol = output / "protocol.json"
     if previous_protocol.exists():
         previous = json.loads(previous_protocol.read_text(encoding="utf-8"))
@@ -453,6 +502,8 @@ def run_experiments(
                 "data_sha256",
                 "development_scope",
                 "training_scope",
+                "series_implementation_sha256",
+                "feature_cache_sha256",
             )
         ):
             raise ValueError(
@@ -484,6 +535,28 @@ def run_experiments(
     else:
         with (output / "blind-features.jsonl").open("w", encoding="utf-8") as stream:
             features = build_examples(rows, stream, emit)
+    if plan.get("series_context"):
+        from .series_context import augment_series_features
+
+        features = augment_series_features(rows, features)
+        with (output / "blind-series-features.jsonl").open("w", encoding="utf-8") as stream:
+            for row, values in zip(rows, features, strict=True):
+                stream.write(
+                    json.dumps(
+                        {
+                            "match_id": str(row["match_id"]),
+                            "observed_at": timestamp(row["start_time"]).isoformat(),
+                            "features": values,
+                        }
+                    )
+                    + "\n"
+                )
+        emit(
+            {
+                "series_context_available": sum(r["series:has_previous"] > 0 for r in features),
+                "total": len(features),
+            }
+        )
     records = {c["name"]: [] for c in plan["candidates"]}
     for fold, prefix in enumerate(plan["development_prefixes"]):
         count = int(before_count * prefix)

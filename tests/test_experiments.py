@@ -307,3 +307,37 @@ def test_monthly_retraining_cannot_use_the_current_or_future_month_results():
         rows[i]["radiant_win"] = not rows[i]["radiant_win"]
     actual = fit_candidate(candidate, rows, features, split, split[2])
     assert actual[selected] == pytest.approx(original[selected])
+
+
+def test_accuracy_objective_keeps_probability_guard_and_both_fold_accuracy_guard():
+    plan = {
+        "primary_metric": "accuracy",
+        "minimum_accuracy_improvement": 0.005,
+        "maximum_brier_regression": 0.002,
+        "candidates": [{"name": n} for n in ("baseline", "loss_bad", "accuracy_unstable", "ok")],
+    }
+
+    def metric(wins, brier):
+        return {"wins": wins, "count": 100, "brier": brier}
+
+    values = {
+        "baseline": [metric(60, 0.23), metric(60, 0.24)],
+        "loss_bad": [metric(70, 0.25), metric(70, 0.25)],
+        "accuracy_unstable": [metric(59, 0.23), metric(70, 0.24)],
+        "ok": [metric(61, 0.231), metric(62, 0.241)],
+    }
+    assert select_candidate(values, plan) == "ok"
+    values["ok"] = [metric(60, 0.23), metric(60, 0.24)]
+    assert select_candidate(values, plan) is None
+
+
+@pytest.mark.parametrize("mode", ["raw", "score_only", "team", "player"])
+def test_calibration_modes_do_not_fit_current_or_future_test_labels(mode):
+    rows = history_rows(300)
+    features = build_examples(rows)
+    split = chronological_split(rows)
+    candidate = {"kind": "linear", "features": "classic", "C": 0.15, "calibration": mode}
+    original = fit_candidate(candidate, rows, features, split, split[2])
+    for i in split[2]:
+        rows[i]["radiant_win"] = not rows[i]["radiant_win"]
+    assert fit_candidate(candidate, rows, features, split, split[2]) == pytest.approx(original)
