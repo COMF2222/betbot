@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "name": "round-4-direct-counters-2026-10-11",
+  "seed": 42,
+  "primary_metric": "brier",
+  "development_prefixes": [0.7, 1.0],
+  "development_scope_path": "tier1-training-2025-2026.json",
+  "training_scope_path": "tier1-training-2025-2026.json",
+  "minimum_brier_improvement": 0.0005,
+  "selection": "Fixed earlier Tier 1 folds; no Brier regression in either fold, no aggregate accuracy regression; then lowest mean Brier",
+  "promotion": "No automatic promotion; future independent evaluation required",
+  "candidates": [
+    {"name": "baseline", "kind": "linear", "features": "classic", "C": 0.15, "hypothesis": "Original control reproduced on the same map IDs and probabilities"},
+    {"name": "direct_counters", "kind": "linear", "features": "counters", "C": 0.15, "hypothesis": "Learn individual cross-team hero matchup coefficients alongside ratings, rather than a mean counter statistic"},
+    {"name": "direct_counters_shrunk", "kind": "linear", "features": "counters", "C": 0.05, "hypothesis": "Learn direct matchups with stronger shrinkage of sparsely observed hero pairs"},
+    {"name": "role_counters_and_lanes", "kind": "linear", "features": "role_counters", "C": 0.15, "hypothesis": "Add directed mid matchups and core-support hero pairs only when past roles are known"},
+    {"name": "role_counters_tier_weighted", "kind": "linear", "features": "role_counters", "C": 0.05, "tier_multiplier": 4, "hypothesis": "Learn concrete matchups and lane pairs with top-level maps weighted more heavily"},
+    {"name": "fixed_global_target_blend", "kind": "blend", "blend_weights": [0.5, 0.5], "members": [{"kind": "linear", "features": "classic", "C": 0.15}, {"kind": "hist_gradient", "features": "compact", "tier_multiplier": 4, "target_calibration": true, "max_depth": 3, "max_leaf_nodes": 8, "min_samples_leaf": 80, "max_iter": 150}], "hypothesis": "A predeclared 50/50 average may reduce nonlinear variance without tuning to four-month outcomes"}
+  ],
+  "excluded_previous_ideas": ["No repeats of the unweighted deeper tree", "No search over blend weights", "No selection using June-October outcomes"],
+  "guardrails": ["Heroes and old roles only; no current lane measurements", "Unknown roles produce no mid or lane pair assumption", "Same baseline probabilities and full 442-map coverage asserted", "Preserve all failed experiments and immutable forecasts"]
+}

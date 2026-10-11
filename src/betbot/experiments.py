@@ -19,6 +19,20 @@ def research_features(history: History, draft: Draft) -> dict[str, float]:
     features.update(history.analytics.features(draft))
     features.update(history.signatures.features(draft))
     roles = history.analytics.assignments(draft)
+    for radiant in draft.radiant:
+        for dire in draft.dire:
+            a, b = sorted((radiant.hero_id, dire.hero_id))
+            features[f"counter:{a}:{b}"] = 0.2 if radiant.hero_id == a else -0.2
+    positions = {side: history.analytics.positioned(roles[side]) for side in ("radiant", "dire")}
+    if 2 in positions["radiant"] and 2 in positions["dire"]:
+        r, d = positions["radiant"][2], positions["dire"][2]
+        a, b = sorted((r, d))
+        features[f"mid_counter:{a}:{b}"] = 0.5 if r == a else -0.5
+    for side, sign in (("radiant", 1), ("dire", -1)):
+        for core, support in ((1, 5), (3, 4)):
+            assigned = positions[side]
+            if core in assigned and support in assigned:
+                features[f"lane_pair:{core}:{assigned[core]}:{assigned[support]}"] = sign * 0.5
     differences = defaultdict(float)
     coverage = 0
     for side, sign in (("radiant", 1), ("dire", -1)):
@@ -70,10 +84,19 @@ def feature_view(features, name):
     }
     if name == "classic":
         return base
+    direct = ("counter:", "mid_counter:", "lane_pair:")
+    if name in ("counters", "role_counters"):
+        prefixes = direct if name == "role_counters" else ("counter:",)
+        return {
+            **base,
+            **{key: value for key, value in features.items() if key.startswith(prefixes)},
+        }
     if name == "interactions":
-        return features
+        return {key: value for key, value in features.items() if not key.startswith(direct)}
     if name == "compact":
-        return {key: value for key, value in features.items() if not key.startswith("pair:")}
+        return {
+            key: value for key, value in features.items() if not key.startswith(("pair:", *direct))
+        }
     raise ValueError(f"Unknown research feature view: {name}")
 
 
@@ -142,6 +165,16 @@ def candidate_partition(candidate, rows, split, target_scope=None):
 
 
 def fit_candidate(candidate, rows, features, split, predict_indices, target_scope=None):
+    if candidate["kind"] == "blend":
+        members = candidate["members"]
+        weights = np.asarray(candidate["blend_weights"], dtype=float)
+        if len(weights) != len(members) or (weights < 0).any() or weights.sum() <= 0:
+            raise ValueError("Invalid predeclared blend weights")
+        predictions = [
+            fit_candidate(member, rows, features, split, predict_indices, target_scope)
+            for member in members
+        ]
+        return np.average(predictions, axis=0, weights=weights)
     from scipy.sparse import vstack
     from sklearn.ensemble import HistGradientBoostingClassifier
     from sklearn.feature_extraction import DictVectorizer
@@ -436,6 +469,17 @@ def run_experiments(
             save_predictions(output / f"tier1-{name}.csv", rows, indices, probabilities)
             predictions[name] = probabilities
         actual = np.asarray([int(rows[i]["radiant_win"]) for i in indices])
+        with (baseline_dir / "results.csv").open(encoding="utf-8-sig") as stream:
+            established = {
+                str(r["match_id"]): float(r["radiant_probability"]) for r in csv.DictReader(stream)
+            }
+        assert {str(rows[i]["match_id"]) for i in indices} == set(established)
+        assert np.allclose(
+            predictions["baseline"],
+            [established[str(rows[i]["match_id"])] for i in indices],
+            atol=1e-10,
+            rtol=1e-10,
+        )
         final = {
             "baseline": probability_metrics(actual, predictions["baseline"]),
             "candidate": probability_metrics(actual, predictions[selected]),

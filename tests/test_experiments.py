@@ -173,3 +173,52 @@ def test_tier_weighting_and_calibration_still_ignore_future_targets():
     assert fit_candidate(candidate, rows, features, split, split[2], scope) == pytest.approx(
         original
     )
+
+
+def test_direct_counters_are_added_but_unknown_roles_never_invent_lanes(draft):
+    history = History()
+    features = research_features(history, draft)
+    counters = {k for k in features if k.startswith("counter:")}
+    assert len(counters) == 25
+    assert not any(k.startswith(("mid_counter:", "lane_pair:")) for k in features)
+    view = feature_view(features, "counters")
+    assert counters.issubset(view) and not counters & feature_view(features, "classic").keys()
+    history.analytics.roles = {
+        str(p.account_id): [i + 1] * 10
+        for side in (draft.radiant, draft.dire)
+        for i, p in enumerate(side)
+    }
+    roles = research_features(history, draft)
+    assert len([k for k in roles if k.startswith("mid_counter:")]) == 1
+    assert len([k for k in roles if k.startswith("lane_pair:")]) == 4
+    assert not any(
+        k.startswith(("counter:", "mid_counter:", "lane_pair:"))
+        for k in feature_view(roles, "compact")
+    )
+
+
+def test_fixed_blend_is_the_declared_average_without_fitting_holdout_targets():
+    rows = history_rows(300)
+    features = build_examples(rows)
+    split = chronological_split(rows)
+    members = [
+        {"kind": "linear", "features": "classic", "C": 0.15},
+        {"kind": "linear", "features": "counters", "C": 0.05},
+    ]
+    p = fit_candidate(
+        {"kind": "blend", "members": members, "blend_weights": [0.5, 0.5]},
+        rows,
+        features,
+        split,
+        split[2],
+    )
+    expected = np.mean([fit_candidate(m, rows, features, split, split[2]) for m in members], axis=0)
+    assert p == pytest.approx(expected)
+    with pytest.raises(ValueError, match="blend weights"):
+        fit_candidate(
+            {"kind": "blend", "members": members, "blend_weights": [-1, 2]},
+            rows,
+            features,
+            split,
+            split[2],
+        )
