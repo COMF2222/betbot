@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "name": "round-2-2026-10-11",
+  "seed": 42,
+  "primary_metric": "brier",
+  "selection": "Lowest mean development Brier, accuracy no worse in aggregate and Brier no worse in either chronological fold",
+  "development_prefixes": [0.7, 1.0],
+  "minimum_brier_improvement": 0.0005,
+  "promotion": "No automatic promotion; require improved Tier 1 accuracy and Brier, uncertainty excluding regression, and a fresh prospective check",
+  "candidates": [
+    {"name": "baseline", "kind": "linear", "features": "classic", "C": 0.15, "hypothesis": "Control reproducing the current training and calibration recipe"},
+    {"name": "stronger_regularization", "kind": "linear", "features": "classic", "C": 0.05, "hypothesis": "Reduce noisy hero and pair coefficients learned on small samples"},
+    {"name": "recent_training", "kind": "linear", "features": "classic", "C": 0.15, "half_life_days": 90, "hypothesis": "Give recent maps more weight when team strength and the meta change"},
+    {"name": "balanced_sides", "kind": "linear", "features": "classic", "C": 0.15, "mirror": true, "hypothesis": "Reduce incidental side-specific correlations by training on both views of each old map"},
+    {"name": "role_interactions", "kind": "linear", "features": "interactions", "C": 0.15, "hypothesis": "Combine form, matchups and hero experience with specific core roles and player-rating distribution"},
+    {"name": "nonlinear_shallow", "kind": "hist_gradient", "features": "compact", "max_depth": 3, "max_leaf_nodes": 8, "min_samples_leaf": 80, "max_iter": 150, "hypothesis": "Learn conditional interactions between draft, experience and actual lineup ratings"},
+    {"name": "nonlinear_deeper", "kind": "hist_gradient", "features": "compact", "max_depth": 4, "max_leaf_nodes": 15, "min_samples_leaf": 100, "max_iter": 200, "hypothesis": "Capture more complex draft combinations while retaining large leaves and regularization"}
+  ],
+  "excluded_previous_ideas": ["form only", "roster only", "matchups only", "players only", "players_form", "signatures only"],
+  "guardrails": ["No current-map result or performance in inputs", "Previous results available only after finish plus 60 seconds", "Purge series across temporal boundaries", "Fit vectorizer and estimator only on the training fold", "Calibrate only on the following calibration fold", "Disable random internal early-stopping split", "Same full Tier 1 coverage and same map IDs", "Never modify data/model.json or existing forecasts"]
+}
