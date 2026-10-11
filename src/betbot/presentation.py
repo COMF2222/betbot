@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from PIL import ImageFont
 
 from .domain import Prediction, Quote, best_quotes, timestamp, utcnow
+from .timing import timing_note
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 
@@ -130,8 +131,8 @@ def caption(p: Prediction, max_age: int = 30, heroes=None, now=None) -> str:
     else:
         info.append("Рынок: кэф на эту карту пока недоступен.")
     lines.append("ℹ️ " + " ".join(info))
-    if p.late_analysis:
-        lines.append("⏱ Разбор с задержкой.")
+    if note := timing_note(p):
+        lines.append("⏱ " + note)
     return "\n".join(lines)
 
 
@@ -154,10 +155,19 @@ def explanation(p: Prediction, heroes: dict[int, dict], max_age: int = 30) -> st
             "radiant" if players is p.draft.radiant else "dire", []
         )
         positions = {r["account_id"]: r["position"] for r in assignments if r.get("position")}
+        side = "radiant" if players is p.draft.radiant else "dire"
+        comfort = {r["account_id"]: r for r in p.analysis.get("comfort", {}).get(side, [])}
         for player in players:
             hero = heroes.get(player.hero_id, {}).get("localized_name", f"Hero #{player.hero_id}")
             position = positions.get(player.account_id)
             suffix = f" · предполагаемая поз. {position}" if position else ""
+            sample = comfort.get(player.account_id, {})
+            if sample.get("count"):
+                suffix += f" · на герое {sample['wins']}/{sample['count']} побед ({sample['win_rate']:.0%})"
+                if sample.get("pick_share") is not None:
+                    suffix += f" · {sample['pick_share']:.0%} его про-карт"
+            elif sample:
+                suffix += " · прошлых про-карт на герое нет в истории"
             lines.append(
                 f"  {esc(player.name or f'ID {player.account_id}', 40)} — {esc(hero, 35)}{suffix}"
             )
@@ -272,8 +282,8 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
             lines.append(
                 f"ℹ️ Рынок {'тоже ' if market_probability >= 0.5 else ''}ждал {esc(expected, 45)} ({probability:.0%})"
             )
-    if p.late_analysis:
-        lines.append("⏱ Разбор с задержкой.")
+    if note := timing_note(p):
+        lines.append("⏱ " + note)
     if result.get("duration"):
         seconds = int(result["duration"])
         for total in p.totals[:3]:
@@ -304,7 +314,7 @@ def stats_text(summary: dict, label: str = "За последние 7 дней")
     late = s.get("late", {})
     if late.get("published"):
         rate = f"{late['wins'] / late['settled']:.1%}" if late["settled"] else "ожидают результата"
-        text += f"\n\n⏱ <b>Отдельно: разборы с задержкой</b>\nОпубликовано: {late['published']} · верно {late['wins']} из {late['settled']} · {rate}."
+        text += f"\n\n⏱ <b>Отдельно: время прогноза не подтверждено или карта уже шла</b>\nОпубликовано: {late['published']} · верно {late['wins']} из {late['settled']} · {rate}."
     return text
 
 

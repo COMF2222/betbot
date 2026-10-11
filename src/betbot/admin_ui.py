@@ -191,7 +191,7 @@ def tournament(service, identity, view="current", page=0):
 
 def publications(service, notice=""):
     mode = "Включена" if service.automatic else "Выключена"
-    text = f"🔔 <b>Публикации</b>\n\nАвтопубликация: <b>{mode}</b>\nПауза: {'да' if service.paused else 'нет'}\nКарты: <b>{'все, включая ровные' if service.publish_all_maps else 'только выраженный фаворит'}</b>\nПорог выделения фаворита: <b>{service.min_probability:.0%}</b>\nРазборы с задержкой: {'включены, отдельный учёт' if service.allow_delayed_analysis else 'выключены'}\nТоталы времени: {'включены' if service.store.get('duration_enabled', False) else 'выключены'}\n\nБез автопубликации новые карточки доступны в личном чате для предварительного просмотра."
+    text = f"🔔 <b>Публикации</b>\n\nАвтопубликация: <b>{mode}</b>\nПауза: {'да' if service.paused else 'нет'}\nКарты: <b>{'все, включая ровные' if service.publish_all_maps else 'только выраженный фаворит'}</b>\nПорог выделения фаворита: <b>{service.min_probability:.0%}</b>\nРазборы после начала карты или без точного времени: {'включены, отдельный учёт' if service.allow_delayed_analysis else 'выключены'}\nТоталы времени: {'включены' if service.store.get('duration_enabled', False) else 'выключены'}\n\nБез автопубликации новые карточки доступны в личном чате для предварительного просмотра."
     if notice:
         text += f"\n\n<blockquote>{esc(notice, 250)}</blockquote>"
     return panel(
@@ -215,9 +215,9 @@ def publications(service, notice=""):
             ],
             [
                 button(
-                    "Разборы с задержкой ✓"
+                    "Дополнительные разборы ✓"
                     if service.allow_delayed_analysis
-                    else "Разборы с задержкой: выкл.",
+                    else "Дополнительные разборы: выкл.",
                     "ui:toggle:delayed",
                 )
             ],
@@ -407,7 +407,7 @@ def statistics(service, period="today"):
                 button("7 дней", "ui:stats:week", "primary" if period == "week" else None),
             ],
             [button("🖼 Карточка отчёта", f"ui:report-card:{period}")],
-            [button("⏱ Отчёт разборов с задержкой", f"ui:report-card:{period}:delayed")],
+            [button("⏱ Отчёт: отдельный учёт", f"ui:report-card:{period}:delayed")],
             [button("📄 Тест Tier 1", "ui:history"), button("💾 История CSV", "ui:export")],
         ],
         "ui:home",

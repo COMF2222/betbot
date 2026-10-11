@@ -40,9 +40,10 @@ def test_temporal_split_purges_series_crossing_boundaries():
         assert not {rows[i]["series_id"] for i in left} & {rows[i]["series_id"] for i in right}
 
 
-def test_fit_and_safe_json_model_roundtrip(tmp_path, draft):
+@pytest.mark.parametrize("feature_set", ["classic", "signatures"])
+def test_fit_and_safe_json_model_roundtrip(tmp_path, draft, feature_set):
     path = tmp_path / "model.json"
-    report = fit(history_rows(), path)
+    report = fit(history_rows(), path, feature_set=feature_set)
     assert report["rows"] == 300
     assert report["test"] >= 25
     assert 0 <= report["brier"] <= 1
@@ -51,6 +52,8 @@ def test_fit_and_safe_json_model_roundtrip(tmp_path, draft):
     assert not report["publication_ready"]  # Fewer than 200 independent test maps.
     model = Model(path)
     p = model.predict(draft)
+    assert set(p.analysis["comfort"]) == {"radiant", "dire"}
+    assert len(p.analysis["comfort"]["radiant"]) == 5
     assert 0 < p.radiant_probability < 1
     assert p.duration_interval[0] <= p.duration_interval[1]
     assert (

@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from .domain import Draft, Player, Quote, timestamp, utcnow
+from .timing import draft_timing
 
 BOOKMAKERS = ("1win", "BetBoom", "Winline", "PARI")
 
@@ -131,8 +132,9 @@ def parse_live(raw: dict, observed_at=None) -> Draft:
         map_number=map_number,
         patch=raw.get("patch"),
         delay_seconds=int(raw.get("delay") or 0),
-        clock_is_delayed=False,
-        clock_known=isinstance(raw.get("game_time"), (int, float)),
+        clock_is_delayed=True,
+        clock_known=isinstance(raw.get("game_time"), (int, float))
+        and isinstance(raw.get("delay"), (int, float)),
         active=not bool(raw.get("deactivate_time")),
     )
 
@@ -231,7 +233,7 @@ class Steam:
 
 
 def merge_live_drafts(opendota: list[Draft], steam: list[Draft], max_age=180) -> list[Draft]:
-    """Steam adds coverage; matching fresh TopLiveGames supplies the undelayed clock."""
+    """Steam adds coverage; matching fresh TopLiveGames supplies a delayed game clock."""
     combined = {d.match_id: d for d in opendota}
     for draft in steam:
         other = combined.get(draft.match_id)
@@ -256,6 +258,7 @@ def merge_live_drafts(opendota: list[Draft], steam: list[Draft], max_age=180) ->
                     source_updated_at=other.source_updated_at,
                     clock_is_delayed=other.clock_is_delayed,
                     clock_known=other.clock_known,
+                    delay_seconds=other.delay_seconds,
                     source_name="Steam + " + other.source_name,
                 )
             elif 0 <= age <= max_age and other.complete and draft.complete:
@@ -677,11 +680,10 @@ def eligible_draft(draft: Draft, max_age: int, max_game_time: int) -> str | None
     reason = eligible_analysis(draft, max_age)
     if reason:
         return reason
-    if not draft.clock_known:
+    stage = draft_timing(draft, max_game_time)
+    if stage == "unverified":
         return "время карты неизвестно: нельзя подтвердить прогноз сразу после драфта"
-    age = max(0, (utcnow() - draft.source_updated_at).total_seconds())
-    delay = draft.delay_seconds if draft.clock_is_delayed else 0
-    if draft.game_time + delay + age > max_game_time:
+    if stage == "late":
         return "карта уже идёт: снимок опоздал для прогноза после драфта"
     return None
 

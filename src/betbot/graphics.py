@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from .presentation import MOSCOW, font
+from .timing import timing_note
 
 WHITE, MUTED, GREEN, RED, GOLD = "#f4f6fa", "#9dabc1", "#57dca3", "#ff7c94", "#e9bd7b"
 CYAN, AMBER, PANEL = "#55dedc", "#e9bd7b", "#162136"
@@ -153,7 +154,7 @@ def forecast_image(p, heroes=None, assets=None, demo=False):
     map_label = f"карта {p.draft.map_number}" if p.draft.map_number else f"ID {p.draft.match_id}"
     detail = (p.league_name + " · " if p.league_name else "") + map_label
     c.header(
-        "разбор с задержкой · Dota 2" if p.late_analysis else "прогноз после драфта · Dota 2",
+        "анализ драфта · Dota 2",
         p.draft.observed_at.astimezone(MOSCOW).strftime("%d.%m · %H:%M МСК"),
         detail,
     )
@@ -327,7 +328,7 @@ def forecast_image(p, heroes=None, assets=None, demo=False):
         if demo
         else "Звёзды — сила сигнала · частота — прошлый временной тест, все про-лиги · цены до расходов"
     )
-    if p.late_analysis and not demo:
-        footer = f"С задержкой / в ходе карты · DotaTV {p.draft.delay_seconds // 60} мин · только пики и составы · отдельный учёт"
+    if not demo and (note := timing_note(p)):
+        footer = note + " Только пики и составы · отдельный учёт"
     c.text(56, 806, footer, 12, GOLD if demo else MUTED, width=1168)
     return c.png()

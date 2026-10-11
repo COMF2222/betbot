@@ -31,7 +31,7 @@ def test_morning_schedule_uses_only_selected_tournaments_and_local_day():
     assert len(series) == 1 and series[0]["start"].hour == 12
     text = brief_caption(series, {"settled": 0, "late": {"settled": 7, "wins": 6}})
     assert "первая в 12:00 МСК" in text and "плей-офф" in text
-    assert "разборы с задержкой: 6 из 7" in text
+    assert "в отдельном учёте: 6 из 7" in text
     assert "Вчера бот" not in text
 
 

@@ -983,7 +983,7 @@ def build_router(service: Service) -> Router:
             late = len(args) > 3 and args[3] == "delayed"
             data = report_payload(service.store, start_at, end_at, label, late_analysis=late)
             if late:
-                data["label"] += " · разборы с задержкой"
+                data["label"] += " · отдельный учёт"
             await callback.message.answer_photo(
                 BufferedInputFile(render_report(data), filename="report.png"),
                 caption=report_caption(data),

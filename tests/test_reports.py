@@ -1,4 +1,5 @@
 import io
+import json
 from dataclasses import replace
 from datetime import timedelta
 
@@ -15,6 +16,31 @@ def published(store, prediction, result):
     delivery = store.begin_delivery(identity, "forecast", -100)
     store.finish_delivery(delivery, "sent", 123)
     store.result(prediction.draft.match_id, result)
+
+
+def test_old_delayed_clock_is_excluded_from_early_totals_without_changing_payload(
+    tmp_path, prediction
+):
+    store = Store(tmp_path / "db.sqlite3")
+    p = replace(
+        prediction,
+        draft=replace(
+            prediction.draft,
+            game_time=-62,
+            delay_seconds=900,
+            clock_is_delayed=False,
+            source_name="Steam + OpenDota",
+        ),
+        late_analysis=False,
+    )
+    published(store, p, {"radiant_win": True})
+    original = store.forecast(1)["payload"]
+    stats = store.summary()
+    assert stats["published"] == 0
+    assert stats["late"]["published"] == stats["late"]["wins"] == 1
+    assert store.forecast(1)["payload"] == original
+    assert json.loads(original)["late_analysis"] is False
+    store.close()
 
 
 def test_day_metrics_follow_saved_forecasts_and_market_pair_coverage(tmp_path, prediction):

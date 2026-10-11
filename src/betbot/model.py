@@ -12,6 +12,7 @@ import numpy as np
 from .analytics import DraftAnalytics
 from .domain import Draft, Player, Prediction, timestamp, utcnow
 from .form import FormHistory, PlayerSkills
+from .signatures import SignatureHistory
 
 FEATURE_SETS = (
     "classic",
@@ -22,6 +23,7 @@ FEATURE_SETS = (
     "adaptive",
     "players",
     "players_form",
+    "signatures",
 )
 
 
@@ -40,6 +42,7 @@ class History:
         self.analytics = DraftAnalytics(raw.get("analytics"))
         self.form = FormHistory(raw.get("form"))
         self.player_skills = PlayerSkills(raw.get("player_skills"))
+        self.signatures = SignatureHistory(raw.get("signatures"))
 
     def export(self) -> dict:
         return {
@@ -51,6 +54,7 @@ class History:
             "analytics": self.analytics.export(),
             "form": self.form.records,
             "player_skills": self.player_skills.ratings,
+            "signatures": self.signatures.export(),
         }
 
     def features(
@@ -110,6 +114,8 @@ class History:
                 features.update(self.form.features(draft))
             if feature_set in ("players", "players_form"):
                 features.update(self.player_skills.features(draft, self.analytics))
+            if feature_set == "signatures":
+                features.update(self.signatures.features(draft))
             if feature_set in ("matchups", "adaptive"):
                 detailed = self.analytics.features(draft)
                 for key in ("counter_advantage", "pair_advantage"):
@@ -129,10 +135,42 @@ class History:
             features[f"patch:{draft.patch}"] = 1
         return features
 
+    def hero_comfort(self, draft: Draft) -> dict:
+        """Pro-map samples for the ten actual player/hero pairs, including misses."""
+        accounts = {p.account_id for p in draft.radiant + draft.dire if p.account_id}
+        totals = dict.fromkeys(accounts, 0)
+        for key, (_, games) in self.player_heroes.items():
+            account = int(key.split(":")[0])
+            if account in totals:
+                totals[account] += games
+        result = {}
+        for side in ("radiant", "dire"):
+            result[side] = []
+            for player in getattr(draft, side):
+                wins, games = self.player_heroes.get(
+                    f"{player.account_id}:{player.hero_id}", [0, 0]
+                )
+                result[side].append(
+                    {
+                        "account_id": player.account_id,
+                        "hero_id": player.hero_id,
+                        "name": player.name,
+                        "count": games,
+                        "wins": wins,
+                        "win_rate": wins / games if games else None,
+                        "smoothed_win_rate": (wins + 3) / (games + 6),
+                        "pick_share": games / totals[player.account_id]
+                        if totals.get(player.account_id)
+                        else None,
+                    }
+                )
+        return result
+
     def update(self, draft: Draft, radiant_win: bool, context: dict | None = None) -> None:
         rid, did = str(draft.radiant_id), str(draft.dire_id)
         expected = 1 / (1 + 10 ** ((self.teams[did] - self.teams[rid]) / 400))
         self.form.update(draft, radiant_win, expected)
+        self.signatures.update(draft, radiant_win, expected)
         self.player_skills.update(draft, radiant_win)
         self.analytics.update(draft, radiant_win, expected, context)
         change = 24 * (int(radiant_win) - expected)
@@ -403,7 +441,7 @@ def fit(rows: list[dict], output: Path, feature_set: str = "classic") -> dict:
     ).hexdigest()[:12]
     artifact = {
         "schema": 1,
-        "version": f"{ {'classic': 'logistic-v2', 'roster': 'roster-v1', 'detailed': 'draft-v3', 'form': 'form-v1', 'matchups': 'matchups-v1', 'adaptive': 'adaptive-v1', 'players': 'players-v1', 'players_form': 'players-form-v1'}[feature_set] }-{fingerprint}",
+        "version": f"{ {'classic': 'logistic-v2', 'roster': 'roster-v1', 'detailed': 'draft-v3', 'form': 'form-v1', 'matchups': 'matchups-v1', 'adaptive': 'adaptive-v1', 'players': 'players-v1', 'players_form': 'players-form-v1', 'signatures': 'signatures-v1'}[feature_set] }-{fingerprint}",
         "feature_set": feature_set,
         "created_at": utcnow().isoformat(),
         "history_cutoff": timestamp(
@@ -521,6 +559,8 @@ class Model:
                 f"Наиболее сильный положительный признак героев: hero:{contributions[0][0].split(':')[1]} (связь в модели, не гарантия контрпика)."
             )
         analysis = history.analytics.describe(draft, "radiant" if favorite_radiant else "dire")
+        analysis["comfort"] = history.hero_comfort(draft)
+        analysis["hero_experience_used_in_model"] = bool(spec["weights"].get("hero_experience", 0))
         reasons.append(
             f"Позиции по предыдущим играм определены для {analysis['role_coverage']} из 10 игроков; перестановки на текущей карте возможны."
         )
@@ -562,11 +602,16 @@ class Model:
                 "mid_player_elo",
                 "roster_elo",
             )
+            or key.startswith("signature_")
         ]
         analysis["used_in_model"] = feature_set == "detailed"
         if feature_set in ("matchups", "adaptive"):
             reasons.append(
                 "Модель использует агрегаты контрпиков и сочетаний с поправкой на силу команд. Статистика линий и мида остаётся справочной."
+            )
+        elif feature_set == "signatures":
+            reasons.append(
+                "Модель учитывает частоту выбора героя игроком, опыт, недавние результаты и текущий патч с поправкой на соперников и объём выборки."
             )
         elif not analysis["used_in_model"]:
             reasons.append(

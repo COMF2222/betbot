@@ -61,7 +61,7 @@ def brief_caption(series, previous=None):
         lines[-1] += f" Вчера бот {previous['wins']} из {previous['settled']}."
     delayed = (previous or {}).get("late", {})
     if delayed.get("settled"):
-        lines.append(f"⏱ Вчера разборы с задержкой: {delayed['wins']} из {delayed['settled']}.")
+        lines.append(f"⏱ Вчера в отдельном учёте: {delayed['wins']} из {delayed['settled']}.")
     if len(series) > 1:
         lines.append(
             "Ещё: "

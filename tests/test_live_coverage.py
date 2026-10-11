@@ -69,7 +69,7 @@ def test_steam_draft_ignores_observers_and_all_current_performance(draft):
     assert eligible_analysis(parsed, 180) is None
 
 
-def test_top_live_current_clock_does_not_add_broadcast_delay(draft):
+def test_top_live_clock_accounts_for_broadcast_delay(draft):
     raw = {
         "match_id": draft.match_id,
         "league_id": draft.league_id,
@@ -87,8 +87,9 @@ def test_top_live_current_clock_does_not_add_broadcast_delay(draft):
         ],
     }
     parsed = parse_live(raw)
-    assert eligible_draft(parsed, 180, 90) is None
-    assert not parsed.clock_is_delayed
+    assert "опоздал" in eligible_draft(parsed, 180, 90)
+    assert parsed.clock_is_delayed
+    assert eligible_draft(parse_live({**raw, "delay": 0}), 180, 90) is None
     assert eligible_analysis(parse_live({**raw, "deactivate_time": 1}), 180)
 
 
@@ -97,7 +98,8 @@ def test_merge_uses_fresh_matching_clock_and_rejects_conflicting_teams(draft):
     top = replace(draft, delay_seconds=900, clock_is_delayed=False)
     merged = merge_live_drafts([top], [steam])[0]
     assert merged.map_number == 1 and merged.series_id == draft.series_id
-    assert not merged.clock_is_delayed and eligible_draft(merged, 180, 90) is None
+    assert "опоздал" in eligible_draft(merged, 180, 90)
+    assert merged.delay_seconds == top.delay_seconds
     conflicting = replace(top, dire_id=999)
     assert not merge_live_drafts([conflicting], [steam])[0].active
     stale = replace(top, source_updated_at=utcnow() - timedelta(hours=1))
@@ -197,7 +199,8 @@ async def test_low_confidence_delayed_analysis_is_published_once_to_both_destina
     assert service.bot.send_photo.await_count == 2
     for call in service.bot.send_photo.call_args_list:
         assert (
-            "Разбор с задержкой" in call.kwargs["caption"] and "Слабый сигнал" in call.kwargs["caption"]
+            "задержка источника 15 мин" in call.kwargs["caption"]
+            and "Слабый сигнал" in call.kwargs["caption"]
         )
     service.store.result(draft.match_id, {"radiant_win": True})
     stats = service.store.summary()
@@ -212,6 +215,17 @@ async def test_modes_can_still_filter_weak_or_delayed_cards(service, draft):
     service.store.set("allow_delayed_analysis", False)
     assert await service.process_draft(replace(draft, game_time=300)) is None
     assert "опоздал" in service.store.match(draft.match_id)["reason"]
+
+
+async def test_unknown_clock_is_saved_as_unverified_and_kept_out_of_early_counts(service, draft):
+    unknown = replace(draft, clock_known=False, delay_seconds=0)
+    identity = await service.process_draft(unknown)
+    row = service.store.forecast(identity)
+    payload = json.loads(row["payload"])
+    assert payload["timing_status"] == "unverified" and payload["late_analysis"]
+    displayed = service.saved_prediction(row["payload"])
+    assert "Время начала карты не подтверждено" in caption(displayed)
+    assert service.store.summary()["published"] == 0  # Not publicly sent without auto-publish.
 
 
 async def test_same_series_has_independent_forecasts_and_results_per_map(service, draft):

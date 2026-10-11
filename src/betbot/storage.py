@@ -4,6 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from .domain import Draft, Prediction, utcnow
+from .timing import separate_timing
 
 
 class Store:
@@ -451,7 +452,7 @@ class Store:
             published = wins = settled = 0
             for row in rows:
                 payload = json.loads(row["payload"])
-                if payload.get("late_analysis", False) != late:
+                if separate_timing(Prediction.from_dict(payload)) != late:
                     continue
                 published += 1
                 result = json.loads(row["result"]) if row["result"] else None

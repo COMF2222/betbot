@@ -38,6 +38,7 @@ from .providers import (
     patch_for_time,
 )
 from .storage import Store
+from .timing import draft_timing, separate_timing
 
 log = logging.getLogger(__name__)
 
@@ -444,11 +445,8 @@ class Service:
             radiant=profiles(draft.radiant),
             dire=profiles(draft.dire),
         )
-        late = bool(
-            eligible_draft(
-                draft, self.settings.max_draft_age_seconds, self.settings.max_game_time_seconds
-            )
-        )
+        timing_status = draft_timing(draft, self.settings.max_game_time_seconds)
+        late = timing_status != "early"
         reason = self.publication_issue(draft, late)
         self.store.observe(draft, "skipped" if reason else "observed", reason or "")
         if (
@@ -488,6 +486,7 @@ class Service:
             self.store.mark(draft.match_id, "skipped", str(exc))
             return None
         p.late_analysis = late
+        p.timing_status = timing_status
         p.signal = p.favorite_probability >= self.min_probability
         if not p.signal and not self.publish_all_maps:
             self.store.mark(draft.match_id, "skipped", "нет достаточно выраженного фаворита")
@@ -524,6 +523,7 @@ class Service:
     def saved_prediction(self, payload: str) -> Prediction:
         p = Prediction.from_dict(json.loads(payload))
         p.draft = p.draft.with_team_aliases(self.store.get("team_aliases", {}))
+        p.late_analysis = separate_timing(p)
         return p
 
     async def preview(self, forecast_id: int):
@@ -889,7 +889,7 @@ class Service:
             )
             if late_analysis:
                 period += ":delayed"
-                summary["label"] += " · разборы с задержкой"
+                summary["label"] += " · отдельный учёт"
             await self.send_report(period, report_caption(summary), render_report(summary), target)
         if now.weekday() == 0 and now.hour >= self.store.get("weekly_report_hour", 12):
             end = datetime.combine(now.date(), time.min, MOSCOW).astimezone(utcnow().tzinfo)
@@ -904,7 +904,7 @@ class Service:
             )
             if summary["published"]:
                 if late_analysis:
-                    summary["label"] += " · разборы с задержкой"
+                    summary["label"] += " · отдельный учёт"
                 await self.send_report(
                     f"week:{start.date()}:{'preliminary' if summary['pending'] else 'final'}"
                     + (":delayed" if late_analysis else ""),

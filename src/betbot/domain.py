@@ -173,6 +173,7 @@ class Prediction:
     league_name: str = ""
     late_analysis: bool = False
     signal: bool = True
+    timing_status: str = ""
 
     @property
     def favorite(self) -> str:
@@ -206,6 +207,7 @@ class Prediction:
             "league_name": self.league_name,
             "late_analysis": self.late_analysis,
             "signal": self.signal,
+            "timing_status": self.timing_status,
         }
 
     @classmethod

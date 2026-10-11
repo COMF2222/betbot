@@ -7,6 +7,7 @@ from datetime import UTC, datetime, time, timedelta
 from .domain import Prediction, Quote, timestamp, utcnow
 from .graphics import AMBER, CYAN, GOLD, MUTED, PANEL, Canvas, strength
 from .presentation import MOSCOW, esc
+from .timing import separate_timing
 
 
 def period_bounds(period="today", now=None):
@@ -60,7 +61,7 @@ def entries_from_rows(rows, late_analysis=False, aliases=None):
     for row in rows:
         p = Prediction.from_dict(json.loads(row["payload"]))
         p.draft = p.draft.with_team_aliases(aliases or {})
-        if p.late_analysis != late_analysis:
+        if separate_timing(p) != late_analysis:
             continue
         actual = json.loads(row["result"]) if row["result"] else {}
         won = actual.get("radiant_win")
@@ -208,7 +209,7 @@ def report_caption(data):
     lines = [title]
     if data.get("late_analysis"):
         lines.append(
-            "⏱ Разборы с задержкой / в ходе карты. Статистика отдельно от прогнозов сразу после драфта."
+            "⏱ Статистика отдельно: прогнозы по ходу карты или с неподтверждённым временем."
         )
     misses = [e for e in data["entries"] if e["correct"] is False]
     if misses:
@@ -273,7 +274,7 @@ def render_report(data):
     c.text(
         80,
         164,
-        "ВЕРНЫХ ПОЗДНИХ РАЗБОРОВ" if data.get("late_analysis") else "ВЕРНЫХ ПРОГНОЗОВ",
+        "ВЕРНЫХ РАЗБОРОВ" if data.get("late_analysis") else "ВЕРНЫХ ПРОГНОЗОВ",
         13,
         MUTED,
         True,
