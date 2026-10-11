@@ -1,0 +1,155 @@
+{
+  "date": "2026-10-11",
+  "live_sample_only": true,
+  "sources": [
+    {
+      "source": "historical OpenDota",
+      "match_id": 8885183102,
+      "pick_ban_entries": 24,
+      "hero_variant_known": 10
+    },
+    {
+      "source": "historical OpenDota",
+      "match_id": 8885195787,
+      "pick_ban_entries": 24,
+      "hero_variant_known": 10
+    },
+    {
+      "source": "historical OpenDota",
+      "match_id": 8885195986,
+      "pick_ban_entries": 24,
+      "hero_variant_known": 10
+    },
+    {
+      "source": "Steam Top",
+      "league_maps": 1,
+      "map_keys": [
+        "activate_time",
+        "average_mmr",
+        "building_state",
+        "custom_game_difficulty",
+        "deactivate_time",
+        "delay",
+        "dire_score",
+        "game_mode",
+        "game_time",
+        "is_player_draft",
+        "is_watch_eligible",
+        "last_update_time",
+        "league_id",
+        "lobby_id",
+        "lobby_type",
+        "match_id",
+        "players",
+        "radiant_lead",
+        "radiant_score",
+        "series_id",
+        "server_steam_id",
+        "sort_score",
+        "spectators",
+        "team_id_dire",
+        "team_id_radiant",
+        "team_logo_dire",
+        "team_logo_radiant",
+        "team_name_dire",
+        "team_name_radiant",
+        "weekend_tourney_bracket_round",
+        "weekend_tourney_division",
+        "weekend_tourney_skill_level",
+        "weekend_tourney_tournament_id"
+      ],
+      "player_keys": [
+        "account_id",
+        "hero_id",
+        "team",
+        "team_slot"
+      ],
+      "series_known": 0,
+      "pick_ban_known": 0,
+      "variants_known": 0
+    },
+    {
+      "source": "Steam League",
+      "league_maps": 35,
+      "map_keys": [
+        "dire_series_wins",
+        "dire_team",
+        "league_id",
+        "league_node_id",
+        "lobby_id",
+        "match_id",
+        "players",
+        "radiant_series_wins",
+        "radiant_team",
+        "scoreboard",
+        "series_type",
+        "spectators",
+        "stream_delay_s"
+      ],
+      "player_keys": [
+        "account_id",
+        "hero_id",
+        "name",
+        "team"
+      ],
+      "scoreboard_player_keys": [
+        "account_id",
+        "assists",
+        "death",
+        "denies",
+        "gold",
+        "gold_per_min",
+        "hero_id",
+        "item0",
+        "item1",
+        "item2",
+        "item3",
+        "item4",
+        "item5",
+        "kills",
+        "last_hits",
+        "level",
+        "net_worth",
+        "player_slot",
+        "position_x",
+        "position_y",
+        "respawn_timer",
+        "ultimate_cooldown",
+        "ultimate_state",
+        "xp_per_min"
+      ],
+      "series_known": 0,
+      "pick_ban_known": 0,
+      "variants_known": 0
+    }
+  ],
+  "published_forecasts_read_only_audit": {
+    "published_maps": 9,
+    "known_series_at_publication": 2,
+    "sources": {
+      "Steam": 7,
+      "Steam + OpenDota": 2
+    }
+  },
+  "current_training_history": {
+    "maps": 20000,
+    "picks_bans_preserved": false,
+    "hero_variants_preserved": false,
+    "known_series": 19953
+  },
+  "research_usable_history": {
+    "maps": 19995,
+    "previous_series_context_available": 9673
+  },
+  "live_model_changed": false,
+  "limitations": [
+    "Live field availability is verified for this snapshot only",
+    "A known historical field does not prove availability at live forecast time",
+    "No current or future match result is supplied to research predictors"
+  ],
+  "official_sources": [
+    "https://docs.opendota.com/",
+    "https://github.com/odota/core/blob/master/global.d.ts",
+    "https://github.com/odota/core/blob/master/svc/livegames.ts"
+  ]
+}
