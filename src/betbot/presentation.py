@@ -2,6 +2,7 @@ import html
 import math
 import re
 from datetime import timedelta
+from functools import lru_cache
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -318,7 +319,13 @@ def stats_text(summary: dict, label: str = "За последние 7 дней")
     return text
 
 
+@lru_cache(maxsize=128)
 def font(size: int, bold: bool = False):
+    bundled = Path(__file__).with_name("resources") / "fonts" / "Manrope.ttf"
+    if bundled.exists():
+        face = ImageFont.truetype(str(bundled), size)
+        face.set_variation_by_axes([800 if bold else 500])
+        return face
     names = [
         Path("C:/Windows/Fonts/seguisb.ttf" if bold else "C:/Windows/Fonts/segoeui.ttf"),
         Path(
@@ -331,6 +338,16 @@ def font(size: int, bold: bool = False):
         if path.exists():
             return ImageFont.truetype(str(path), size)
     return ImageFont.load_default(size=size)
+
+
+@lru_cache(maxsize=32)
+def international_font(size: int, bold: bool = False):
+    path = Path(__file__).with_name("resources") / "fonts" / "NotoSansJP.ttf"
+    if path.exists():
+        face = ImageFont.truetype(str(path), size)
+        face.set_variation_by_axes([700 if bold else 500])
+        return face
+    return font(size, bold)
 
 
 def render_card(

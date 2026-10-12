@@ -5,7 +5,7 @@ import math
 from datetime import UTC, datetime, time, timedelta
 
 from .domain import Prediction, Quote, timestamp, utcnow
-from .graphics import AMBER, CYAN, GOLD, MUTED, PANEL, Canvas, strength
+from .graphics import AMBER, CYAN, GOLD, MUTED, SUBTLE, SURFACE, Canvas, strength
 from .presentation import MOSCOW, esc
 from .timing import separate_timing
 
@@ -291,118 +291,140 @@ def render_report(data):
         f"{moment.day} {months[moment.month - 1]}",
         weekdays[moment.weekday()],
     )
-    d.rounded_rectangle((56, 148, 410, 316), radius=18, fill=PANEL)
+    c.panel((56, 148, 1224, 282), CYAN)
+    c.text(80, 171, "ИГРОКИ + ДРАФТ", 17, bold=True, middle=True)
+    if data.get("late_analysis"):
+        c.text(360, 171, "ОТДЕЛЬНЫЙ УЧЁТ", 13, GOLD, True, width=330, middle=True)
     c.text(
         80,
-        164,
-        "ВЕРНЫХ РАЗБОРОВ" if data.get("late_analysis") else "ВЕРНЫХ ПРОГНОЗОВ",
-        13,
-        MUTED,
+        218,
+        f"{data['wins']} / {data['settled']}",
+        77,
+        CYAN,
         True,
-    )
-    number = c.text(76, 260, str(data["wins"]), 83, CYAN, True, width=170, fit=True, baseline=True)
-    count_x = number[2] + 16
-    c.text(
-        count_x,
-        260,
-        f"/ {data['settled']}",
-        42,
-        MUTED,
-        True,
-        width=386 - count_x,
+        width=640,
         fit=True,
-        baseline=True,
+        middle=True,
+    )
+    c.text(
+        80, 263, f"{data['wins']} зашло · {data['losses']} мимо", 17, MUTED, width=640, middle=True
     )
     rate = f"{data['accuracy']:.0%}" if data["accuracy"] is not None else "—"
-    c.text(80, 281, f"{rate} точность · {data['losses']} мимо", 19, bold=True, width=305)
-    d.rounded_rectangle((434, 148, 1224, 316), radius=18, fill=PANEL)
-    for y, title, count, wins, color in (
-        (163, "ИГРОКИ + ДРАФТ", data["settled"], data["wins"], CYAN),
-        (235, "ТОЛЬКО ДРАФТ", data["draft_count"], data["draft_wins"], AMBER),
-    ):
-        c.text(460, y + 10, title, 13, MUTED, True, middle=True)
-        c.text(1198, y + 10, f"{wins} / {count}", 20, color, True, right=True, middle=True)
-        c.bar(y + 35, wins / count if count else 0, 460, 738, (color, "#29354b"))
-    c.text(56, 330, f"КАРТЫ / ОПУБЛИКОВАНО {data['published']}", 12, MUTED, True)
-    c.text(690, 330, "ИГРОКИ + ДРАФТ", 12, CYAN, True)
-    c.text(978, 330, "ТОЛЬКО ДРАФТ", 12, AMBER, True)
-    for i, entry in enumerate(data["entries"][:5]):
-        y = 363 + i * 48
-        row_center = y + 12.5
-        c.text(56, row_center, f"{i + 1:02d}", 13, MUTED, middle=True)
-        c.text(92, row_center, entry["label"], 17, bold=True, width=575, middle=True)
-        for x, correct, name, probability in (
-            (690, entry["correct"], entry["favorite"], entry["probability"]),
+    c.text(1200, 171, "ТОЧНОСТЬ", 14, MUTED, True, right=True, middle=True)
+    c.text(1200, 233, rate, 85, bold=True, width=365, fit=True, right=True, middle=True)
+    c.panel((56, 300, 1224, 342))
+    c.text(80, 321, "ТОЛЬКО ДРАФТ · для сравнения", 15, MUTED, True, width=410, middle=True)
+    count, wins = data["draft_count"], data["draft_wins"]
+    c.bar(315, wins / count if count else 0, 530, 440, (AMBER, SUBTLE))
+    c.text(1200, 321, f"{wins} / {count}", 21, AMBER, True, right=True, width=190, middle=True)
+    c.text(
+        80,
+        362,
+        f"КАРТЫ · опубликовано {data['published']}",
+        14,
+        MUTED,
+        True,
+        width=560,
+        middle=True,
+    )
+    c.text(690, 362, "ИГРОКИ + ДРАФТ", 13, CYAN, True, middle=True)
+    c.text(978, 362, "ТОЛЬКО ДРАФТ", 13, AMBER, True, middle=True)
+    for index, entry in enumerate(data["entries"][:5]):
+        center = 400 + index * 46
+        if index % 2 == 0:
+            d.rounded_rectangle((56, center - 21, 1224, center + 21), radius=9, fill=SUBTLE)
+        c.text(80, center, f"{index + 1:02d}", 13, MUTED, middle=True)
+        teams, separator, map_number = entry["label"].rpartition(" · карта ")
+        c.text(
+            118,
+            center,
+            teams if separator else entry["label"],
+            17,
+            bold=True,
+            width=478,
+            middle=True,
+        )
+        if separator:
+            c.text(
+                646, center, f"#{map_number}", 15, MUTED, True, right=True, width=42, middle=True
+            )
+        for x, correct, name, probability, color in (
+            (690, entry["correct"], entry["favorite"], entry["probability"], CYAN),
             (
                 978,
                 entry["draft_correct"],
                 entry["draft_favorite"],
                 entry["draft_probability"],
+                AMBER,
             ),
         ):
-            c.result(x, y + 1, correct)
-            c.text(x + 33, row_center, name, 14, bold=True, width=145, middle=True)
-            c.text(x + 238, row_center, f"{probability:.0%}", 15, MUTED, right=True, middle=True)
-        d.line((56, y + 38, 1224, y + 38), fill="#283449", width=1)
+            c.result(x, center - 11.5, correct)
+            c.text(x + 33, center, name, 14, bold=True, width=155, middle=True)
+            c.text(
+                x + 238,
+                center,
+                f"{probability:.0%}",
+                18,
+                color,
+                True,
+                right=True,
+                width=58,
+                middle=True,
+            )
     if not data["entries"]:
-        c.text(56, 392, "За этот период опубликованных прогнозов пока нет", 23, MUTED)
+        c.text(
+            80,
+            423,
+            "За этот период опубликованных прогнозов пока нет",
+            22,
+            MUTED,
+            width=1100,
+            middle=True,
+        )
     more = (
         f"Ещё {len(data['entries']) - 5} карт — в постах выше"
         if len(data["entries"]) > 5
         else "Все карты этого периода"
     )
-    c.text(56, 622, more, 14, MUTED, middle=True)
+    c.text(56, 624, more, 14, MUTED, width=620, middle=True)
+    status = ""
     if data["pending"]:
-        c.text(
-            1224,
-            622,
-            f"Ожидают результата: {data['pending']} · предварительно",
-            14,
-            GOLD,
-            right=True,
-            middle=True,
-        )
+        status = f"Ожидают результата: {data['pending']} · предварительно"
     elif data.get("demo"):
-        c.text(
-            1224,
-            622,
-            "ДЕМОНСТРАЦИЯ / ВСЕ ДАННЫЕ УСЛОВНЫЕ",
-            12,
-            GOLD,
-            right=True,
-            middle=True,
-        )
+        status = "ДЕМОНСТРАЦИЯ · ДАННЫЕ УСЛОВНЫЕ"
     elif data.get("additional"):
         extra = data["additional"]
+        status = f"Отдельный учёт: {extra['wins']}/{extra['settled']}"
+    if status:
         c.text(
             1224,
-            622,
-            f"Отдельный учёт: {extra['wins']}/{extra['settled']}",
-            14,
-            MUTED,
+            624,
+            status,
+            13,
+            GOLD if data.get("demo") or data["pending"] else MUTED,
             right=True,
-            width=430,
+            width=500,
             middle=True,
         )
-    d.rounded_rectangle((56, 649, 1224, 703), radius=12, fill="#1b293f")
+    c.panel((56, 649, 1224, 703), fill=SURFACE)
     total = data["cumulative"]
     c.text(
-        76,
+        80,
         676,
-        f"С начала: игроки + драфт {total['wins']}/{total['settled']} · только драфт {total['draft_wins']}/{total['draft_count']}",
-        16,
+        f"С начала: {total['wins']}/{total['settled']} · только драфт {total['draft_wins']}/{total['draft_count']}",
+        17,
         bold=True,
-        width=795,
+        width=790,
         middle=True,
     )
-    c.stars(904, 669, 3, 14)
+    c.stars(906, 668, 3, 15)
     c.text(
         1200,
         676,
         f"и выше: {total['strong_wins']}/{total['strong_count']}",
         15,
         right=True,
-        width=178,
+        width=160,
         middle=True,
     )
     return c.png()

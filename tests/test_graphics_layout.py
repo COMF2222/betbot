@@ -6,7 +6,8 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 
-from betbot.graphics import forecast_image
+from betbot.graphics import CYAN, MUTED, PANEL, WHITE, forecast_image
+from betbot.presentation import international_font
 from betbot.reports import demo_report, render_report
 
 
@@ -99,7 +100,7 @@ def test_logo_glyph_is_centered_in_the_rendered_badge(prediction, text_boxes, la
 def test_hero_labels_share_the_center_of_their_portraits(prediction, text_boxes):
     forecast_image(prediction)
     for i, player in enumerate(prediction.draft.radiant):
-        center = 529 + i * 137 + 62
+        center = 488 + i * 144 + 68
         labels = [box for text, box in text_boxes if text == player.name]
         assert labels
         for box in labels:
@@ -108,7 +109,28 @@ def test_hero_labels_share_the_center_of_their_portraits(prediction, text_boxes)
 
 def test_report_labels_align_with_result_icons(text_boxes):
     render_report(demo_report())
-    rows = [box for _, box in text_boxes if 361 <= box[1] and box[3] <= 582]
+    rows = [box for _, box in text_boxes if 380 <= box[1] and box[3] <= 605]
     for box in rows:
         center = (box[1] + box[3]) / 2
-        assert any(abs(center - (375.5 + i * 48)) <= 1 for i in range(5))
+        assert any(abs(center - (400 + i * 46)) <= 1 for i in range(5))
+
+
+def test_japanese_nicks_render_real_glyphs_instead_of_identical_missing_boxes():
+    face = international_font(18)
+    assert bytes(face.getmask("鬼")) != bytes(face.getmask("誇"))
+
+
+def test_design_text_colors_have_accessible_contrast():
+    def luminance(color):
+        values = [int(color[index : index + 2], 16) / 255 for index in (1, 3, 5)]
+        linear = [
+            value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+            for value in values
+        ]
+        return sum(
+            value * weight for value, weight in zip(linear, (0.2126, 0.7152, 0.0722), strict=True)
+        )
+
+    for color in (WHITE, MUTED, CYAN):
+        foreground, background = sorted((luminance(color), luminance(PANEL)))
+        assert (background + 0.05) / (foreground + 0.05) >= 4.5
