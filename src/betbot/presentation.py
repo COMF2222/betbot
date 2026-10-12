@@ -108,6 +108,7 @@ def caption(p: Prediction, max_age: int = 30, heroes=None, now=None) -> str:
     map_label = f"карта {d.map_number}" if d.map_number else f"карта ID {d.match_id}"
     lines = [
         f"🤖 <b>Бот за {esc(p.favorite_name, 45)} против {esc(opponent, 45)}</b>, {map_label}: <b>{p.favorite_probability:.0%}</b>, {stars(p.favorite_probability)}",
+        tournament_line(p),
         "",
         "👉 " + short_reasons(p, heroes),
     ]
@@ -135,6 +136,11 @@ def caption(p: Prediction, max_age: int = 30, heroes=None, now=None) -> str:
     if note := timing_note(p):
         lines.append("⏱ " + note)
     return "\n".join(lines)
+
+
+def tournament_line(p: Prediction) -> str:
+    name = (p.league_name or "").strip() or f"Турнир #{p.draft.league_id}"
+    return "🏆 " + esc(name, 120)
 
 
 def explanation(p: Prediction, heroes: dict[int, dict], max_age: int = 30) -> str:
@@ -224,6 +230,7 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
         lines = [
             f"❌ <b>Мимо: {label} взяли {esc(winner, 60)}</b>, бот был за {esc(p.favorite_name, 60)} с {signal}{price}"
         ]
+    lines.append(tournament_line(p))
     start = timestamp(result.get("start_time"))
     finish = (
         start + timedelta(seconds=int(result["duration"]))

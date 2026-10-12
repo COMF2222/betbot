@@ -698,6 +698,10 @@ class Service:
 
     def saved_prediction(self, payload: str) -> Prediction:
         p = Prediction.from_dict(json.loads(payload))
+        if not p.league_name:
+            p.league_name = next(
+                (r["name"] for r in self.store.leagues() if r["id"] == p.draft.league_id), ""
+            )
         p.draft = p.draft.with_team_aliases(self.store.get("team_aliases", {}))
         p.late_analysis = separate_timing(p)
         return p

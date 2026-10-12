@@ -46,7 +46,8 @@ def test_public_post_is_short_and_uses_real_hero_statistics(prediction):
     assert "80 карт" not in text and "По одним героям ровно" in text
     assert "по истории" not in text and "Рейтинг" not in text
     assert "1.52" in text and "2.70" in text
-    assert len(text) < 650 and len([line for line in text.splitlines() if line]) == 3
+    assert text.splitlines()[1] == "🏆 " + p.league_name
+    assert len(text) < 650 and len([line for line in text.splitlines() if line]) == 4
     assert all(
         word not in text for word in ("Безубыточный", "Версия", "временной тест", "Длительность")
     )
@@ -80,7 +81,8 @@ def test_result_uses_original_price_and_only_observed_in_game_extremes(predictio
     text = result_text(p, result, snapshots)
     assert "Зашло" in text and "карту 2" in text and "кэф 1.52" in text
     assert "наблюдали до 2.04" in text and "99.00" not in text
-    assert len(text.splitlines()) == 1
+    assert text.splitlines()[1] == "🏆 " + p.league_name
+    assert len(text.splitlines()) == 2
 
 
 def test_miss_does_not_invent_a_comeback_or_a_market_preference(prediction):
@@ -89,6 +91,7 @@ def test_miss_does_not_invent_a_comeback_or_a_market_preference(prediction):
     result = {"radiant_win": False, "start_time": int(now.timestamp()), "duration": 1800}
     text = result_text(p, result)
     assert "Мимо" in text and "бот был за" in text and "Рынок тоже ждал" in text
+    assert text.splitlines()[1] == "🏆 " + p.league_name
     assert "падала" not in text
     when = now + timedelta(minutes=5)
     snapshots = [
