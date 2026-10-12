@@ -559,7 +559,7 @@ def build_router(service: Service) -> Router:
         service.store.set("daily_report_hour", int(args[1]))
         service.store.set("weekly_report_hour", int(args[2]))
         await message.answer(
-            "Часы сохранены. Дневной отчёт календарный; неполные результаты отмечаются явно."
+            "Часы сохранены. Один итог за закрытый день после подтверждения результатов. Вечернее время означает отправку после полуночи."
         )
 
     @router.message(Command("confirm"))
@@ -831,11 +831,13 @@ def build_router(service: Service) -> Router:
                 "ui:settings",
             )
         elif action in ("report-hours", "set-report-hour"):
-            if action == "set-report-hour" and int(args[2]) in (0, 4, 23):
+            from .reports import daily_report_hour
+
+            if action == "set-report-hour" and int(args[2]) in (0, 4):
                 service.store.set("daily_report_hour", int(args[2]))
-            hour = service.store.get("daily_report_hour", 23)
+            hour = daily_report_hour(service.store.get("daily_report_hour", 0))
             screen = ui.panel(
-                f"📅 <b>Время отчётов</b>\n\nДень: <b>{hour:02d}:00 МСК</b>.\nНеделя: понедельник, <b>{service.store.get('weekly_report_hour', 12):02d}:00 МСК</b>.\n\nВечерний отчёт предварительный до конца календарного дня. После подтверждения результатов бот выпустит итог.",
+                f"📅 <b>Время отчётов</b>\n\nДень: <b>{hour:02d}:00 МСК</b>.\nНеделя: понедельник, <b>{service.store.get('weekly_report_hour', 12):02d}:00 МСК</b>.\n\nОдин итог за закрытый день, когда подтверждены результаты всех опубликованных карт.",
                 [
                     [
                         ui.button(
@@ -843,7 +845,7 @@ def build_router(service: Service) -> Router:
                             f"ui:set-report-hour:{h}",
                             "primary" if hour == h else None,
                         )
-                        for h in (23, 0, 4)
+                        for h in (0, 4)
                     ]
                 ],
                 "ui:settings",

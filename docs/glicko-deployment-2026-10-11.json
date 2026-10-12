@@ -1,0 +1,40 @@
+{
+  "backup": "/root/betbot-deploy-check/before-glicko-20261011T175556Z",
+  "previous_version": "logistic-v2-89bc7fac69d6",
+  "active_version": "glicko-team-research-v1-aea4609b642d",
+  "model_sha256": "350b26c63ad5ebf378a0cb7ffb1fec629f4cf51e28ec84237be66251246b7320",
+  "activated_at": "2026-10-11T17:55:57.157466+00:00",
+  "feature_set": "glicko_team",
+  "old_forecasts_checked": 10,
+  "old_forecasts_unchanged": true,
+  "container_status": "running",
+  "health": "healthy",
+  "restarts": 0,
+  "automatic_settings": {
+    "auto_publish": "true"
+  },
+  "publication_ready": true,
+  "glicko_teams": 1645,
+  "other_applications": [
+    {
+      "name": "fastcloud-backend-mihomo-1",
+      "unchanged": true
+    },
+    {
+      "name": "fastcloud-backend-fastcloud-1",
+      "unchanged": true
+    }
+  ],
+  "source_commit": "ecbf484",
+  "historical_comparison": {
+    "baseline": {
+      "wins": 285,
+      "maps": 442
+    },
+    "glicko": {
+      "wins": 291,
+      "maps": 442
+    }
+  },
+  "future_accuracy_confirmed": false
+}

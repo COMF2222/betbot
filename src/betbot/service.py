@@ -813,7 +813,6 @@ class Service:
         for target in self.destinations:
             if not self.paused and target["chat_id"] in {t["chat_id"] for t in self.destinations}:
                 await self.reports_for(target)
-                await self.reports_for(target, late_analysis=True)
 
     async def morning_brief(self):
         from .brief import brief_caption, scheduled_series
@@ -864,53 +863,69 @@ class Service:
         except Exception as exc:
             self.store.health("Утренний анонс", False, type(exc).__name__)
 
-    async def reports_for(self, target, late_analysis=False):
+    async def reports_for(self, target):
         now = utcnow().astimezone(MOSCOW)
-        from .reports import render_report, report_caption, report_payload
+        from .reports import daily_report_hour, public_report_payload, render_report, report_caption
 
-        hour = self.store.get("daily_report_hour", 23)
-        days = list(range(1, 8)) if hour >= 12 or now.hour >= hour else []
-        if hour >= 12 and now.hour >= hour:
-            days.insert(0, 0)
+        hour = daily_report_hour(self.store.get("daily_report_hour", 0))
+        days = list(range(1, 8)) if now.hour >= hour else list(range(2, 8))
         for days_ago in days:
             day = now.date() - timedelta(days=days_ago)
             start = datetime.combine(day, time.min, MOSCOW).astimezone(utcnow().tzinfo)
             end = start + timedelta(days=1)
-            summary = report_payload(
+            summary = public_report_payload(
                 self.store,
                 start.isoformat(),
                 end.isoformat(),
                 destination=target["chat_id"],
-                late_analysis=late_analysis,
             )
-            if not summary["published"]:
+            if (
+                not summary["published"]
+                or summary["pending"]
+                or summary.get("additional", {}).get("pending")
+            ):
                 continue
-            phase = "preliminary" if summary["pending"] or days_ago == 0 else "final"
-            period = f"day:{day}:{phase}"
-            summary["label"] = (
-                "Предварительные итоги дня" if phase == "preliminary" else "Итоги дня"
-            )
-            if late_analysis:
+            period = f"day:{day}:final"
+            if summary["late_analysis"]:
                 period += ":delayed"
-                summary["label"] += " · отдельный учёт"
+            previous = (f"day:{day}:final", f"day:{day}:final:delayed")
+            if any(
+                key != period
+                and self.store.report_state(key, target["chat_id"])
+                in ("sent", "sending", "uncertain")
+                for key in previous
+            ):
+                continue
             await self.send_report(period, report_caption(summary), render_report(summary), target)
         if now.weekday() == 0 and now.hour >= self.store.get("weekly_report_hour", 12):
             end = datetime.combine(now.date(), time.min, MOSCOW).astimezone(utcnow().tzinfo)
             start = end - timedelta(days=7)
-            summary = report_payload(
+            summary = public_report_payload(
                 self.store,
                 start.isoformat(),
                 end.isoformat(),
                 "Итоги недели",
                 target["chat_id"],
-                late_analysis,
             )
-            if summary["published"]:
-                if late_analysis:
-                    summary["label"] += " · отдельный учёт"
+            if (
+                summary["published"]
+                and not summary["pending"]
+                and not summary.get("additional", {}).get("pending")
+            ):
+                period = f"week:{start.date()}:final" + (
+                    ":delayed" if summary["late_analysis"] else ""
+                )
+                other = f"week:{start.date()}:final" + (
+                    "" if summary["late_analysis"] else ":delayed"
+                )
+                if self.store.report_state(other, target["chat_id"]) in (
+                    "sent",
+                    "sending",
+                    "uncertain",
+                ):
+                    return
                 await self.send_report(
-                    f"week:{start.date()}:{'preliminary' if summary['pending'] else 'final'}"
-                    + (":delayed" if late_analysis else ""),
+                    period,
                     report_caption(summary),
                     render_report(summary),
                     target,

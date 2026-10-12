@@ -205,12 +205,11 @@ def report_payload(store, since, until, label="Итоги дня", destination=N
 
 def report_caption(data):
     total = data["settled"]
-    title = f"{'✅' if data['accuracy'] is not None and data['accuracy'] >= 0.5 else '📊'} <b>{data['wins']} из {total} · {esc(data['label'].lower(), 35)}</b>"
+    label = data["label"].lower().replace(" · отдельный учёт", "")
+    title = f"{'✅' if data['accuracy'] is not None and data['accuracy'] >= 0.5 else '📊'} <b>{data['wins']} из {total} · {esc(label, 100)}</b>"
     lines = [title]
     if data.get("late_analysis"):
-        lines.append(
-            "⏱ Статистика отдельно: прогнозы по ходу карты или с неподтверждённым временем."
-        )
+        lines.append("⏱ Статистика отдельно: разборы после старта или без точного времени.")
     misses = [e for e in data["entries"] if e["correct"] is False]
     if misses:
         lines.append(
@@ -222,7 +221,7 @@ def report_caption(data):
         lines.append(f"⏳ Ещё {data['pending']} карт ожидают результата. Отчёт предварительный.")
     if data["market_count"]:
         lines.append(
-            f"👉 По ценам рынка ожидалось примерно {data['market_expected']:.1f} из {data['market_count']} карт с котировками."
+            f"👉 Рынок ждал {data['market_expected']:.1f} из {data['market_count']} карт с ценами."
         )
         if data["against_count"]:
             lines.append(f"Против рынка: {data['against_wins']} из {data['against_count']}.")
@@ -237,13 +236,35 @@ def report_caption(data):
     lines.append(
         f"ℹ️ С начала: {all_time['wins']} из {all_time['settled']} · только драфт: {all_time['draft_wins']} из {all_time['draft_count']}."
     )
-    if all_time["market_count"]:
+    if all_time["market_count"] and all_time["settled"] != data["settled"]:
         lines.append(
             f"Рынок: примерно {all_time['market_expected']:.1f} из {all_time['market_count']} карт с ценами."
+        )
+    if data.get("additional"):
+        extra = data["additional"]
+        lines.append(
+            f"⏱ Отдельный учёт: {extra['wins']} из {extra['settled']} — разборы после старта или без точного времени."
         )
     if data.get("demo"):
         lines.insert(0, "<b>ДЕМОНСТРАЦИЯ · все данные условные</b>")
     return "\n".join(lines)
+
+
+def public_report_payload(store, since, until, label="Итоги дня", destination=None):
+    """One public message, keeping early and additional statistics distinct."""
+    early = report_payload(store, since, until, label, destination)
+    extra = report_payload(store, since, until, label, destination, late_analysis=True)
+    if not early["published"]:
+        extra["label"] += " · отдельный учёт"
+        return extra
+    if extra["published"]:
+        early["additional"] = extra
+    return early
+
+
+def daily_report_hour(value):
+    """Legacy evening settings now mean one final report after midnight."""
+    return 0 if int(value) >= 12 else int(value)
 
 
 def render_report(data):
@@ -349,6 +370,18 @@ def render_report(data):
             12,
             GOLD,
             right=True,
+            middle=True,
+        )
+    elif data.get("additional"):
+        extra = data["additional"]
+        c.text(
+            1224,
+            622,
+            f"Отдельный учёт: {extra['wins']}/{extra['settled']}",
+            14,
+            MUTED,
+            right=True,
+            width=430,
             middle=True,
         )
     d.rounded_rectangle((56, 649, 1224, 703), radius=12, fill="#1b293f")

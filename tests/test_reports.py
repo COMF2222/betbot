@@ -174,6 +174,18 @@ def test_missing_quotes_are_not_fabricated_and_demo_is_explicit(tmp_path, predic
     store.close()
 
 
+def test_complete_report_title_and_market_line_are_not_truncated_or_duplicated():
+    data = demo_report()
+    data["demo"] = False
+    data["late_analysis"] = True
+    data["label"] = "Предварительные итоги дня · отдельный учёт"
+    data["cumulative"] = {key: data[key] for key in data["cumulative"]}
+    text = report_caption(data)
+    assert "предварительные итоги дня</b>" in text
+    assert text.count("Рынок") == 1
+    assert len(text) < 1024
+
+
 def test_channel_report_counts_only_posts_delivered_to_that_channel(tmp_path, prediction):
     store = Store(tmp_path / "db.sqlite3")
     now = utcnow()

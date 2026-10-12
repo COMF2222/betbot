@@ -332,10 +332,89 @@ async def test_reports_go_to_each_enabled_destination_and_are_not_duplicated(
         service.store.finish_delivery(delivery, "sent", 10)
     service.store.result(draft.match_id, {"radiant_win": True})
     await service.reports()
+    assert service.bot.send_photo.await_count == 0  # No preliminary post at 23:30.
+    now += timedelta(hours=1)  # The calendar day has closed in Moscow.
+    await service.reports()
     await service.reports()
     assert service.bot.send_photo.await_count == 2
     assert {c.args[0] for c in service.bot.send_photo.call_args_list} == {-100, -200}
     assert all("1 из 1" in c.kwargs["caption"] for c in service.bot.send_photo.call_args_list)
+
+
+async def test_final_report_waits_for_last_result_and_survives_repeated_ticks(
+    service, draft, monkeypatch
+):
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 10, 10, 20, 30, tzinfo=UTC)
+    for module in ("service", "storage", "reports"):
+        monkeypatch.setattr(f"betbot.{module}.utcnow", lambda: now)
+    service.store.set("auto_publish", True)
+    service.store.set("daily_report_hour", 23)
+    service.bot = SimpleNamespace(send_photo=AsyncMock(return_value=SimpleNamespace(message_id=40)))
+    service.store.observe(draft, "observed")
+    identity = service.store.add_forecast(service.model.predict(draft))
+    delivery = service.store.begin_delivery(identity, "forecast", -100)
+    service.store.finish_delivery(delivery, "sent", 10)
+    now += timedelta(hours=1)
+    await service.reports()
+    assert service.bot.send_photo.await_count == 0
+    service.store.result(draft.match_id, {"radiant_win": True})
+    await service.reports()
+    await service.reports()
+    assert service.bot.send_photo.await_count == 1
+    assert "предваритель" not in service.bot.send_photo.call_args.kwargs["caption"]
+
+
+async def test_mixed_timing_stats_share_one_post_without_merging_counts(
+    service, draft, monkeypatch
+):
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 10, 10, 20, 30, tzinfo=UTC)
+    for module in ("service", "storage", "reports"):
+        monkeypatch.setattr(f"betbot.{module}.utcnow", lambda: now)
+    service.store.set("auto_publish", True)
+    service.bot = SimpleNamespace(send_photo=AsyncMock(return_value=SimpleNamespace(message_id=40)))
+    for late in (False, True):
+        d = replace(draft, match_id="late" if late else draft.match_id)
+        p = replace(service.model.predict(d), late_analysis=late)
+        service.store.observe(d, "observed")
+        identity = service.store.add_forecast(p)
+        delivery = service.store.begin_delivery(identity, "forecast", -100)
+        service.store.finish_delivery(delivery, "sent", 10)
+        service.store.result(d.match_id, {"radiant_win": not late})
+    now += timedelta(hours=1)
+    await service.reports()
+    await service.reports()
+    assert service.bot.send_photo.await_count == 1
+    body = service.bot.send_photo.call_args.kwargs["caption"]
+    assert "1 из 1 · итоги дня" in body and "Отдельный учёт: 0 из 1" in body
+
+
+@pytest.mark.parametrize("old_late", [False, True])
+async def test_existing_final_of_other_timing_kind_blocks_duplicate_after_upgrade(
+    service, draft, monkeypatch, old_late
+):
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 10, 10, 20, 30, tzinfo=UTC)
+    for module in ("service", "storage", "reports"):
+        monkeypatch.setattr(f"betbot.{module}.utcnow", lambda: now)
+    service.store.set("auto_publish", True)
+    service.bot = SimpleNamespace(send_photo=AsyncMock(return_value=SimpleNamespace(message_id=40)))
+    p = replace(service.model.predict(draft), late_analysis=not old_late)
+    service.store.observe(draft, "observed")
+    identity = service.store.add_forecast(p)
+    delivery = service.store.begin_delivery(identity, "forecast", -100)
+    service.store.finish_delivery(delivery, "sent", 10)
+    service.store.result(draft.match_id, {"radiant_win": True})
+    key = "day:2026-10-10:final" + (":delayed" if old_late else "")
+    service.store.begin_report(key, -100)
+    service.store.finish_report(key, -100, "sent", 99)
+    now += timedelta(hours=1)
+    await service.reports()
+    assert service.bot.send_photo.await_count == 0
 
 
 async def test_legacy_binding_migrates_once_and_does_not_reenable_disabled_target(tmp_path):
