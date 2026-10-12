@@ -39,6 +39,7 @@ from .providers import (
 )
 from .storage import Store
 from .timing import draft_timing, separate_timing
+from .tournaments import Liquipedia, enrich_markets
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +60,8 @@ class Service:
         self.http = HTTP(settings.proxy_url or None)
         self.odota = OpenDota(self.http, settings.opendota_api_key)
         self.poly = Polymarket(self.http)
+        self.liquipedia = Liquipedia(self.http)
+        self.tournament_task = None
         self.steam = Steam(self.http, settings.steam_api_key) if settings.steam_api_key else None
         self.live_cache = None
         self.live_lock = asyncio.Lock()
@@ -81,6 +84,7 @@ class Service:
         self.tick_lock = asyncio.Lock()
         self.activity_lock = asyncio.Lock()
         self.calendar = calendar_events()
+        self.update_tournament_calendar()
         for event in self.calendar:
             self.store.league(int(event["league_id"]), event["name"])
         self.stop = asyncio.Event()
@@ -164,7 +168,112 @@ class Service:
 
     async def close(self):
         self.stop.set()
+        if self.tournament_task and not self.tournament_task.done():
+            self.tournament_task.cancel()
+            await asyncio.gather(self.tournament_task, return_exceptions=True)
         await self.http.close()
+
+    def update_tournament_calendar(self):
+        events = {int(e["league_id"]): e for e in self.calendar}
+        for event in self.store.tournaments():
+            if event["league_id"]:
+                # A Dota ticket can be shared by several stages; keep the widest calendar.
+                previous = events.get(event["league_id"])
+                if (
+                    previous
+                    and previous["end_date"] >= event["start_date"]
+                    and event["end_date"] >= previous["start_date"]
+                ):
+                    event = {
+                        **event,
+                        "market_keywords": event.get("market_keywords")
+                        or previous.get("market_keywords", []),
+                        "start_date": min(previous["start_date"], event["start_date"]),
+                        "end_date": max(previous["end_date"], event["end_date"]),
+                    }
+                events[event["league_id"]] = event
+        self.calendar = list(events.values())
+
+    async def refresh_tournaments(self):
+        now = utcnow()
+        self.store.set("tournament_catalog_checked_at", now.isoformat())
+        try:
+            events = await self.liquipedia.tournaments(now)
+            try:
+                markets = await self.poly.discover()
+            except Exception as exc:
+                markets = []
+                self.store.health("Расписание Polymarket", False, type(exc).__name__)
+            events = enrich_markets(events, markets, now)
+            for event in events:
+                self.store.remember_tournament(event)
+            self.store.set("tournament_catalog_current", [event["source_key"] for event in events])
+            self.update_tournament_calendar()
+            self.store.health(
+                "Новые турниры · Liquipedia",
+                True,
+                f"Tier 1/2: {len(events)}; проверены даты и уровень каждого события",
+            )
+            self.store.set("tournament_catalog_updated_at", utcnow().isoformat())
+        except Exception as exc:
+            self.store.health("Новые турниры · Liquipedia", False, type(exc).__name__)
+
+    def start_tournament_refresh(self, force=False):
+        if self.tournament_task and not self.tournament_task.done():
+            return self.tournament_task
+        checked = timestamp(self.store.get("tournament_catalog_checked_at"))
+        if not force and checked and 0 <= (utcnow() - checked).total_seconds() < 1800:
+            return None
+        self.tournament_task = asyncio.create_task(self.refresh_tournaments())
+        return self.tournament_task
+
+    async def notify_tournaments(self):
+        from .admin_ui import tournament_alert
+
+        if not self.bot:
+            return
+        today = utcnow().astimezone(MOSCOW).date().isoformat()
+        events = sorted(
+            self.store.tournaments(), key=lambda event: (event["start_date"], event["id"])
+        )
+        verified = self.store.get("tournament_catalog_current")
+        for admin in sorted(self.settings.admins):
+            sent = 0
+            for event in events:
+                if (
+                    event["tier"] not in (1, 2)
+                    or event["end_date"] < today
+                    or event["enabled"]
+                    or verified is not None
+                    and event["source_key"] not in verified
+                ):
+                    continue
+                notice = self.store.tournament_notice(event["id"], admin)
+                if notice and notice["state"] == "failed":
+                    updated = timestamp(notice["updated_at"])
+                    if updated and (utcnow() - updated).total_seconds() < 1800:
+                        continue
+                if not self.store.begin_tournament_notice(event["id"], admin):
+                    continue
+                screen = tournament_alert(self, event["id"], admin)
+                try:
+                    message = await self.bot.send_message(
+                        admin, screen.text, reply_markup=screen.keyboard
+                    )
+                    self.store.finish_tournament_notice(
+                        event["id"], admin, "sent", message.message_id
+                    )
+                except (TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter) as exc:
+                    self.store.finish_tournament_notice(event["id"], admin, "failed")
+                    self.store.health("Уведомления о турнирах", False, type(exc).__name__)
+                    break
+                except Exception as exc:
+                    self.store.finish_tournament_notice(event["id"], admin, "uncertain")
+                    self.store.health("Уведомления о турнирах", False, type(exc).__name__)
+                    break
+                sent += 1
+                if sent >= 3:
+                    break
 
     async def refresh_catalog(self):
         try:
@@ -961,6 +1070,7 @@ class Service:
             return
         async with self.tick_lock:
             self.tick_count += 1
+            self.start_tournament_refresh()
             self.model.reload()
             await self.refresh_league_activity()
             if self.store.leagues(enabled_only=True):
@@ -1014,6 +1124,7 @@ class Service:
             await self.track_market_prices()
             await self.morning_brief()
             await self.reports()
+            await self.notify_tournaments()
 
     async def run(self):
         from .runtime import heartbeat

@@ -242,6 +242,67 @@ async def press(bot, dispatcher, data):
     await dispatcher.feed_update(bot, Update(update_id=2, callback_query=callback))
 
 
+async def test_new_tournament_can_be_skipped_and_enabled_later_from_catalog(routed_bot):
+    bot, dispatcher, service, session = routed_bot
+    day = utcnow().astimezone(MOSCOW).date().isoformat()
+    service.store.remember_tournament(
+        {
+            "source_key": "liquipedia:Test/Cup",
+            "name": "New Cup",
+            "tier": 2,
+            "start_date": day,
+            "end_date": day,
+            "league_id": 456,
+            "source": "https://liquipedia.net/dota2/Test/Cup",
+        }
+    )
+    service.store.set("tournament_catalog_checked_at", utcnow().isoformat())
+    await press(bot, dispatcher, "ui:event-skip:1:0")
+    assert service.store.tournament_notice(1, 1)["decision"] == "skipped"
+    assert not service.store.enabled(456)
+    await press(bot, dispatcher, "ui:tournaments:0")
+    assert "New Cup" in session.requests[-1].text
+    await press(bot, dispatcher, "ui:event-watch:1:0")
+    await press(bot, dispatcher, "ui:event-watch:1:0")
+    assert service.store.enabled(456)
+    assert service.store.tournament_notice(1, 1)["decision"] == "watched"
+    assert "Отслеживание включено" in session.requests[-1].text
+
+
+@pytest.mark.parametrize("user_id,chat_id,chat_type", [(1, -100, "supergroup"), (7, 7, "private")])
+async def test_tournament_action_requires_private_admin_chat(
+    routed_bot, user_id, chat_id, chat_type
+):
+    bot, dispatcher, service, _ = routed_bot
+    day = utcnow().astimezone(MOSCOW).date().isoformat()
+    service.store.remember_tournament(
+        {
+            "source_key": "liquipedia:Test/Cup",
+            "name": "New Cup",
+            "tier": 2,
+            "start_date": day,
+            "end_date": day,
+            "league_id": 456,
+            "source": "https://liquipedia.net/dota2/Test/Cup",
+        }
+    )
+    message = Message(
+        message_id=100,
+        date=datetime.now(),
+        chat=Chat(id=chat_id, type=chat_type),
+        text="Уведомление",
+    )
+    callback = CallbackQuery(
+        id="alert",
+        from_user=User(id=user_id, is_bot=False, first_name="User"),
+        chat_instance="test",
+        data="ui:event-watch:1:0",
+        message=message,
+    )
+    await dispatcher.feed_update(bot, Update(update_id=2, callback_query=callback))
+    assert not service.store.enabled(456)
+
+
 async def test_navigation_edits_one_message_and_returns_to_correct_parent(routed_bot):
     bot, dispatcher, service, session = routed_bot
     for target in (

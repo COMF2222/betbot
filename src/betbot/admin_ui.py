@@ -9,6 +9,7 @@ from .domain import utcnow
 from .leagues import league_rows
 from .presentation import MOSCOW, esc, stats_text
 from .providers import BOOKMAKERS
+from .tournaments import event_status
 
 
 @dataclass
@@ -68,6 +69,7 @@ def home(service):
         text,
         [
             [button("🏆 Текущие турниры", "ui:leagues:current:0", "primary")],
+            [button("🔔 Новые турниры · Tier 1/2", "ui:tournaments:0")],
             [
                 button("🔔 Публикации", "ui:settings"),
                 button("📣 Куда публиковать", "ui:destinations"),
@@ -140,6 +142,7 @@ def tournaments(service, view="current", page=0, query=""):
             button("↻ Обновить", f"ui:league-refresh:{view}:{page}"),
         ]
     )
+    buttons.append([button("📅 Новые и предстоящие · Tier 1/2", "ui:tournaments:0")])
     if query:
         buttons.append([button("Сбросить поиск", f"ui:league-clear:{view}:0")])
     return panel(text, buttons, "ui:home")
@@ -187,6 +190,86 @@ def tournament(service, identity, view="current", page=0):
         ],
         parent,
     )
+
+
+def tournament_alert(service, identity, admin, notice="", catalog=False, page=0):
+    event = service.store.tournament(identity)
+    if not event:
+        return panel("Турнир не найден. Откройте каталог заново.", [], "ui:tournaments:0")
+    status = event_status(event, service.store.get("league_activity", {}))
+    start = datetime.fromisoformat(event["start_date"])
+    end = datetime.fromisoformat(event["end_date"])
+    heading = "Турнир" if catalog else "Новый турнир"
+    text = f"🏆 <b>{heading} · Tier {event['tier']}</b>\n<b>{esc(event['name'], 150)}</b>\n\n📅 Начало: <b>{start:%d.%m.%Y}</b>\n{status}\nДо {end:%d.%m.%Y}"
+    if event.get("next_match_at"):
+        from .domain import timestamp
+
+        match = timestamp(event["next_match_at"])
+        if match and match >= utcnow():
+            text += f"\n⏰ Ближайший матч: {match.astimezone(MOSCOW):%d.%m · %H:%M} МСК"
+    decision = service.store.tournament_notice(identity, admin)
+    if event["enabled"]:
+        text += (
+            "\n\n🟢 Отслеживание включено"
+            if event["league_id"]
+            else "\n\n🟢 Турнир выбран. Отслеживание включится, когда появится игровой ID."
+        )
+    elif decision and decision["decision"] == "skipped":
+        text += "\n\nВы пропустили уведомление. Турнир можно включить здесь в любой момент."
+    if notice:
+        text += f"\n\n{esc(notice, 220)}"
+    text += f'\n\n<a href="{esc(event["source"], 250)}">Liquipedia · даты и Tier</a>'
+    if event.get("polymarket_url"):
+        text += f' · <a href="{esc(event["polymarket_url"], 250)}">Polymarket</a>'
+    buttons = []
+    if event["enabled"]:
+        buttons.append(
+            [button("Отключить отслеживание", f"ui:event-unwatch:{identity}:{page}", "danger")]
+        )
+    else:
+        buttons.append(
+            [
+                button("✓ Отслеживать", f"ui:event-watch:{identity}:{page}", "success"),
+                button("Пропустить", f"ui:event-skip:{identity}:{page}"),
+            ]
+        )
+    return panel(text, buttons, f"ui:tournaments:{page}")
+
+
+def tournament_catalog(service, admin, page=0):
+    today = utcnow().astimezone(MOSCOW).date().isoformat()
+    events = sorted(
+        service.store.tournaments(),
+        key=lambda e: (e["end_date"] < today, e["start_date"], e["name"]),
+    )
+    page = max(0, min(page, max(0, (len(events) - 1) // 7)))
+    rows = events[page * 7 : (page + 1) * 7]
+    text = "📅 <b>Каталог · Tier 1 и Tier 2</b>\n\nПропущенные турниры остаются здесь. Выберите событие, чтобы включить отслеживание."
+    if not rows:
+        text += "\n\nПроверяем календарь Liquipedia. Новые турниры появятся здесь и придут в личный чат."
+    buttons = []
+    for event in rows:
+        decision = service.store.tournament_notice(event["id"], admin)
+        marker = (
+            "🟢"
+            if event["enabled"]
+            else "⏭"
+            if decision and decision["decision"] == "skipped"
+            else "⚪"
+        )
+        text += f"\n\n{marker} <b>{esc(event['name'], 100)}</b> · Tier {event['tier']}\n{datetime.fromisoformat(event['start_date']):%d.%m.%Y} · {event_status(event, service.store.get('league_activity', {}))}"
+        buttons.append([button(f"{marker} {event['name']}"[:55], f"ui:event:{event['id']}:{page}")])
+    if events:
+        text += f"\n\nСтраница {page + 1} из {(len(events) + 6) // 7}"
+    paging = []
+    if page:
+        paging.append(button("‹ Предыдущие", f"ui:tournaments:{page - 1}"))
+    if (page + 1) * 7 < len(events):
+        paging.append(button("Следующие ›", f"ui:tournaments:{page + 1}"))
+    if paging:
+        buttons.append(paging)
+    buttons.append([button("↻ Проверить новые турниры", f"ui:tournament-refresh:{page}")])
+    return panel(text, buttons, "ui:home")
 
 
 def publications(service, notice=""):

@@ -731,14 +731,59 @@ def build_router(service: Service) -> Router:
 
     @router.callback_query(F.data.startswith("ui:"))
     async def navigate(callback: CallbackQuery):
-        await callback.answer()
         args = callback.data.split(":")
         action, user_id = args[1], callback.from_user.id
+        if action in (
+            "tournaments",
+            "tournament-refresh",
+            "event",
+            "event-watch",
+            "event-skip",
+            "event-unwatch",
+        ) and (
+            not isinstance(callback.message, Message)
+            or callback.message.chat.type != ChatType.PRIVATE
+            or callback.message.chat.id != user_id
+        ):
+            await callback.answer(
+                "Управление новыми турнирами доступно в личной админке.", show_alert=True
+            )
+            return
+        await callback.answer()
         clear_input(user_id)
         if action == "home":
             for view in ("current", "selected", "archive"):
                 service.store.set(f"ui_filter:{user_id}:{view}", "")
             screen = ui.home(service)
+        elif action in ("tournaments", "tournament-refresh"):
+            page = max(0, int(args[2]))
+            service.start_tournament_refresh(force=action == "tournament-refresh")
+            screen = ui.tournament_catalog(service, user_id, page)
+        elif action in ("event", "event-watch", "event-skip", "event-unwatch"):
+            identity, page = int(args[2]), max(0, int(args[3]))
+            notice = ""
+            if service.store.tournament(identity) and action != "event":
+                if action == "event-skip":
+                    service.store.decide_tournament(identity, user_id, "skipped")
+                    notice = "Повторных уведомлений не будет. Турнир сохранён в каталоге."
+                else:
+                    enabled = action == "event-watch"
+                    event = service.store.watch_tournament(identity, enabled)
+                    service.store.decide_tournament(
+                        identity, user_id, "watched" if enabled else "skipped"
+                    )
+                    notice = (
+                        "Турнир включён в отслеживание."
+                        if enabled and event["league_id"]
+                        else "Выбор сохранён."
+                        if enabled
+                        else "Отслеживание выключено."
+                    )
+                    service.update_tournament_calendar()
+                service.store.audit("tournament", f"{user_id}:{identity}:{action}")
+            screen = ui.tournament_alert(
+                service, identity, user_id, notice, catalog=True, page=page
+            )
         elif action in ("leagues", "league-refresh", "league-clear"):
             view, page = args[2], max(0, int(args[3]))
             if action == "league-clear":

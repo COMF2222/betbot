@@ -30,6 +30,8 @@ class Store:
             CREATE INDEX IF NOT EXISTS quote_history_match ON quote_history(match_id,observed_at);
             CREATE TABLE IF NOT EXISTS destinations(chat_id INTEGER PRIMARY KEY, title TEXT NOT NULL, chat_type TEXT NOT NULL, topic_id INTEGER, enabled INTEGER NOT NULL DEFAULT 1);
             CREATE INDEX IF NOT EXISTS delivery_destination ON deliveries(forecast_id,kind,destination,state);
+            CREATE TABLE IF NOT EXISTS tournaments(id INTEGER PRIMARY KEY AUTOINCREMENT, source_key TEXT NOT NULL UNIQUE, payload TEXT NOT NULL, league_id INTEGER, watch_requested INTEGER NOT NULL DEFAULT 0, discovered_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS tournament_notices(tournament_id INTEGER NOT NULL REFERENCES tournaments(id), admin_id INTEGER NOT NULL, state TEXT NOT NULL, message_id INTEGER, decision TEXT, updated_at TEXT NOT NULL, PRIMARY KEY(tournament_id,admin_id));
         """)
         if "topic_id" not in {r[1] for r in self.db.execute("PRAGMA table_info(deliveries)")}:
             with self.db:
@@ -43,6 +45,7 @@ class Store:
             self.db.execute("UPDATE deliveries SET state='uncertain' WHERE state='sending'")
             self.db.execute("UPDATE forecasts SET state='uncertain' WHERE state='sending'")
             self.db.execute("UPDATE reports SET state='uncertain' WHERE state='sending'")
+            self.db.execute("UPDATE tournament_notices SET state='uncertain' WHERE state='sending'")
 
     def destination(self, chat_id, title, chat_type, topic_id=None, enabled=True):
         with self.db:
@@ -163,6 +166,90 @@ class Store:
     def enabled(self, league_id: int) -> bool:
         row = self.db.execute("SELECT enabled FROM leagues WHERE id=?", (league_id,)).fetchone()
         return bool(row and row[0])
+
+    def remember_tournament(self, event):
+        now = utcnow().isoformat()
+        with self.db:
+            previous = self.db.execute(
+                "SELECT * FROM tournaments WHERE source_key=?", (event["source_key"],)
+            ).fetchone()
+            league_id = event.get("league_id") or (previous["league_id"] if previous else None)
+            self.db.execute(
+                "INSERT INTO tournaments(source_key,payload,league_id,discovered_at,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(source_key) DO UPDATE SET payload=excluded.payload,league_id=excluded.league_id,updated_at=excluded.updated_at",
+                (event["source_key"], json.dumps(event, ensure_ascii=False), league_id, now, now),
+            )
+            if league_id:
+                self.db.execute(
+                    "INSERT INTO leagues(id,name) VALUES (?,?) ON CONFLICT(id) DO NOTHING",
+                    (league_id, event["name"]),
+                )
+                if previous and previous["watch_requested"] and not previous["league_id"]:
+                    self.db.execute("UPDATE leagues SET enabled=1 WHERE id=?", (league_id,))
+
+    def tournament(self, identity):
+        row = self.db.execute("SELECT * FROM tournaments WHERE id=?", (identity,)).fetchone()
+        if not row:
+            return None
+        value = {
+            **json.loads(row["payload"]),
+            **{k: row[k] for k in ("id", "league_id", "watch_requested")},
+        }
+        value["enabled"] = (
+            self.enabled(value["league_id"])
+            if value["league_id"]
+            else bool(value["watch_requested"])
+        )
+        return value
+
+    def tournaments(self):
+        ids = [r[0] for r in self.db.execute("SELECT id FROM tournaments ORDER BY id")]
+        return [self.tournament(identity) for identity in ids]
+
+    def watch_tournament(self, identity, enabled=True):
+        event = self.tournament(identity)
+        if not event:
+            return None
+        with self.db:
+            self.db.execute(
+                "UPDATE tournaments SET watch_requested=? WHERE id=?", (int(enabled), identity)
+            )
+            if event["league_id"]:
+                self.db.execute(
+                    "UPDATE leagues SET enabled=? WHERE id=?", (int(enabled), event["league_id"])
+                )
+        return self.tournament(identity)
+
+    def tournament_notice(self, identity, admin):
+        row = self.db.execute(
+            "SELECT * FROM tournament_notices WHERE tournament_id=? AND admin_id=?",
+            (identity, admin),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def begin_tournament_notice(self, identity, admin):
+        with self.db:
+            row = self.tournament_notice(identity, admin)
+            if row and (row["state"] not in ("planned", "failed") or row["decision"]):
+                return False
+            self.db.execute(
+                "INSERT INTO tournament_notices(tournament_id,admin_id,state,updated_at) VALUES (?,?,'sending',?) ON CONFLICT(tournament_id,admin_id) DO UPDATE SET state='sending',updated_at=excluded.updated_at",
+                (identity, admin, utcnow().isoformat()),
+            )
+        return True
+
+    def finish_tournament_notice(self, identity, admin, state, message_id=None):
+        with self.db:
+            self.db.execute(
+                "UPDATE tournament_notices SET state=?,message_id=COALESCE(?,message_id),updated_at=? WHERE tournament_id=? AND admin_id=?",
+                (state, message_id, utcnow().isoformat(), identity, admin),
+            )
+
+    def decide_tournament(self, identity, admin, decision):
+        with self.db:
+            self.db.execute(
+                "INSERT INTO tournament_notices(tournament_id,admin_id,state,decision,updated_at) VALUES (?,?,'planned',?,?) ON CONFLICT(tournament_id,admin_id) DO UPDATE SET decision=excluded.decision,updated_at=excluded.updated_at",
+                (identity, admin, decision, utcnow().isoformat()),
+            )
 
     def observe(self, draft: Draft, status: str, reason: str = "") -> None:
         with self.db:
