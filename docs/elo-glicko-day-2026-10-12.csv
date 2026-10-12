@@ -1,0 +1,21 @@
+﻿match_id,time_moscow,tournament,radiant,dire,map,winner,elo_favorite,elo_probability,elo_correct,glicko_favorite,glicko_probability,glicko_correct
+9041175322,2026-10-12T09:16:51.167072+03:00,DreamLeague Season 30 Qualifiers,Imperial Power,Crescent,1,Crescent,Imperial Power,0.5812244796186979,False,Imperial Power,0.6460029385206738,False
+9041226872,2026-10-12T10:34:16.170458+03:00,DreamLeague Season 30 Qualifiers,Imperial Power,Crescent,2,Imperial Power,Imperial Power,0.5325774779130872,True,Crescent,0.5511173499471358,False
+9041254392,2026-10-12T11:13:37.472744+03:00,DreamLeague Season 30 Qualifiers,Imperial Power,Crescent,3,Imperial Power,Imperial Power,0.526298693149817,True,Crescent,0.5546626794409111,False
+9041259055,2026-10-12T11:16:52.952029+03:00,DreamLeague Season 30 Qualifiers,Team Thailand,Team Kinetix,1,Team Kinetix,Team Thailand,0.5533658070707519,False,Team Thailand,0.6038999818395052,False
+9041258212,2026-10-12T11:22:28.852195+03:00,DreamLeague Season 30 Qualifiers,Team Nemesis Academy,Ivory,1,Ivory,Team Nemesis Academy,0.5686111047792615,False,Team Nemesis Academy,0.5625531349549321,False
+9041304542,2026-10-12T12:14:58.708151+03:00,DreamLeague Season 30 Qualifiers,Team Kinetix,Team Thailand,2,Team Kinetix,Team Kinetix,0.5277150810444325,True,Team Kinetix,0.6144950299998017,True
+9041325002,2026-10-12T12:35:16.144641+03:00,DreamLeague Season 30 Qualifiers,Ivory,Team Nemesis Academy,2,Team Nemesis Academy,Ivory ,0.5276829477547658,False,Ivory ,0.6229529177156169,False
+9041416365,2026-10-12T14:18:58.826917+03:00,DreamLeague Season 30 Qualifiers,Ivory,Team Nemesis Academy,3,Ivory,Ivory ,0.5594831564975741,True,Ivory ,0.5227706296106032,True
+9041580095,2026-10-12T16:21:36.346376+03:00,EPL Masters 2026,CyberHero,Team Lynx,1,CyberHero,CyberHero,0.5087226401629115,True,Team Lynx,0.5235459214492976,False
+9041588706,2026-10-12T16:21:40.011482+03:00,DreamLeague Season 30 Qualifiers,Nemiga Gaming,111,1,Nemiga Gaming,111,0.5508729520614677,False,111,0.5050395182906691,False
+9041689216,2026-10-12T17:16:49.116685+03:00,DreamLeague Season 30 Qualifiers,111,Nemiga Gaming,2,Nemiga Gaming,111,0.622167901442738,False,Nemiga Gaming,0.5149743672982012,True
+9041695822,2026-10-12T17:22:41.145823+03:00,DreamLeague Season 30 Qualifiers,Old blood,WhiteSails,1,WhiteSails,WhiteSails,0.5324073832852568,True,WhiteSails,0.5860532343326146,True
+9041695741,2026-10-12T17:22:47.418973+03:00,DreamLeague Season 30 Qualifiers,Dawn Bulls,Mena Warriors,1,Dawn Bulls,Dawn Bulls,0.5986116324129838,True,Dawn Bulls,0.800649302842192,True
+9041711962,2026-10-12T17:30:12.379352+03:00,EPL Masters 2026,Team Lynx,CyberHero,2,Team Lynx,CyberHero,0.5658501897064803,False,CyberHero,0.5950857996664838,False
+9041800914,2026-10-12T18:20:19.665877+03:00,DreamLeague Season 30 Qualifiers,Mena Warriors,Dawn Bulls,2,Dawn Bulls,Dawn Bulls,0.580778052456936,True,Dawn Bulls,0.7864335351858495,True
+9041797807,2026-10-12T18:22:06.981631+03:00,EPL Masters 2026,Team Lynx,CyberHero,3,Team Lynx,Team Lynx,0.5304780647714399,True,Team Lynx,0.5370382079460673,True
+9041943103,2026-10-12T19:50:03.331485+03:00,EPL Masters 2026,Team Lynx,Mena Warriors,1,Team Lynx,Team Lynx,0.5573504291660624,True,Team Lynx,0.6479086915576012,True
+9042082112,2026-10-12T21:06:45.521457+03:00,EPL Masters 2026,Mena Warriors,Team Lynx,2,Team Lynx,Team Lynx,0.5339513261708058,True,Team Lynx,0.6501853788622569,True
+9042204645,2026-10-12T22:27:31.282993+03:00,EPL Masters 2026,Dawn Bulls,The Warriors,1,The Warriors,Dawn Bulls,0.6094738171950732,False,Dawn Bulls,0.736393826012058,False
+9042286563,2026-10-12T23:26:39.669419+03:00,EPL Masters 2026,Dawn Bulls,The Warriors,2,Dawn Bulls,Dawn Bulls,0.6165601130431811,True,Dawn Bulls,0.6276730733151653,True

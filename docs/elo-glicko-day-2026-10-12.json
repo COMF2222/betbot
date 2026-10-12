@@ -1,0 +1,677 @@
+{
+  "date": "2026-10-12",
+  "timezone": "Europe/Moscow",
+  "since": "2026-10-12T00:00:00+03:00",
+  "until_exclusive": "2026-10-13T00:00:00+03:00",
+  "sample": "All unique published forecasts, selected by created_at, including weak and delayed analyses",
+  "model_versions": {
+    "elo": "logistic-v2-89bc7fac69d6",
+    "glicko": "glicko-team-research-v1-aea4609b642d"
+  },
+  "model_hashes": {
+    "elo": "5f92566f491499c7baf686cb3cc06239b34ef44bd06cad76bd393163ddc07e91",
+    "glicko": "350b26c63ad5ebf378a0cb7ffb1fec629f4cf51e28ec84237be66251246b7320"
+  },
+  "history_cutoffs": {
+    "elo": "2026-10-10T14:49:49+00:00",
+    "glicko": "2026-10-10T14:49:49+00:00"
+  },
+  "actual": {
+    "correct": 10,
+    "maps": 20
+  },
+  "summary": {
+    "elo": {
+      "correct": 12,
+      "maps": 20,
+      "accuracy": 0.6,
+      "brier": 0.25327300070972203,
+      "signals_correct": 5,
+      "signals_count": 12
+    },
+    "glicko": {
+      "correct": 10,
+      "maps": 20,
+      "accuracy": 0.5,
+      "brier": 0.24955575972419877,
+      "signals_correct": 7,
+      "signals_count": 15
+    }
+  },
+  "by_league": {
+    "DreamLeague Season 30 Qualifiers": {
+      "elo": {
+        "correct": 7,
+        "maps": 13,
+        "accuracy": 0.5384615384615384,
+        "brier": 0.25783421502777676,
+        "signals_correct": 3,
+        "signals_count": 8
+      },
+      "glicko": {
+        "correct": 6,
+        "maps": 13,
+        "accuracy": 0.46153846153846156,
+        "brier": 0.24779325898350918,
+        "signals_correct": 4,
+        "signals_count": 10
+      }
+    },
+    "EPL Masters 2026": {
+      "elo": {
+        "correct": 5,
+        "maps": 7,
+        "accuracy": 0.7142857142857143,
+        "brier": 0.24480217411904906,
+        "signals_correct": 2,
+        "signals_count": 4
+      },
+      "glicko": {
+        "correct": 4,
+        "maps": 7,
+        "accuracy": 0.5714285714285714,
+        "brier": 0.25282897538547944,
+        "signals_correct": 3,
+        "signals_count": 5
+      }
+    }
+  },
+  "timing": {
+    "early": 0,
+    "separate": 20
+  },
+  "paired_outcomes": {
+    "elo_False_glicko_False": 7,
+    "elo_True_glicko_False": 3,
+    "elo_True_glicko_True": 9,
+    "elo_False_glicko_True": 1
+  },
+  "verification": {
+    "published_predictions_checked": 20,
+    "max_published_difference": 0.0,
+    "prospective_shadow_predictions_checked": 6,
+    "max_shadow_difference": 0.0
+  },
+  "maps": [
+    {
+      "match_id": "9041175322",
+      "time_moscow": "2026-10-12T09:16:51.167072+03:00",
+      "league": "DreamLeague Season 30 Qualifiers",
+      "league_id": 20359,
+      "radiant": "Imperial Power",
+      "dire": "Crescent",
+      "map": 1,
+      "winner": "Crescent",
+      "separate_timing": true,
+      "published_model": "glicko-team-research-v1-aea4609b642d",
+      "published_correct": false,
+      "elo": {
+        "favorite": "Imperial Power",
+        "probability": 0.5812244796186979,
+        "radiant_probability": 0.5812244796186979,
+        "correct": false,
+        "brier": 0.33782189570802623,
+        "history_as_of": "2026-10-12T01:25:17.758096+00:00"
+      },
+      "glicko": {
+        "favorite": "Imperial Power",
+        "probability": 0.6460029385206738,
+        "radiant_probability": 0.6460029385206738,
+        "correct": false,
+        "brier": 0.41731979657734547,
+        "history_as_of": "2026-10-12T01:25:17.758096+00:00"
+      }
+    },
+    {
+      "match_id": "9041226872",
+      "time_moscow": "2026-10-12T10:34:16.170458+03:00",
+      "league": "DreamLeague Season 30 Qualifiers",
+      "league_id": 20359,
+      "radiant": "Imperial Power",
+      "dire": "Crescent",
+      "map": 2,
+      "winner": "Imperial Power",
+      "separate_timing": true,
+      "published_model": "glicko-team-research-v1-aea4609b642d",
+      "published_correct": false,
+      "elo": {
+        "favorite": "Imperial Power",
+        "probability": 0.5325774779130872,
+        "radiant_probability": 0.5325774779130872,
+        "correct": true,
+        "brier": 0.2184838141540905,
+        "history_as_of": "2026-10-12T07:13:50.564710+00:00"
+      },
+      "glicko": {
+        "favorite": "Crescent",
+        "probability": 0.5511173499471358,
+        "radiant_probability": 0.44888265005286415,
+        "correct": false,
+        "brier": 0.30373033341275374,
+        "history_as_of": "2026-10-12T07:13:50.564710+00:00"
+      }
+    },
+    {
+      "match_id": "9041254392",
+      "time_moscow": "2026-10-12T11:13:37.472744+03:00",
+      "league": "DreamLeague Season 30 Qualifiers",
+      "league_id": 20359,
+      "radiant": "Imperial Power",
+      "dire": "Crescent",
+      "map": 3,
+      "winner": "Imperial Power",
+      "separate_timing": true,
+      "published_model": "glicko-team-research-v1-aea4609b642d",
+      "published_correct": false,
+      "elo": {
+        "favorite": "Imperial Power",
+        "probability": 0.526298693149817,
+        "radiant_probability": 0.526298693149817,
+        "correct": true,
+        "brier": 0.2243929281115712,
+        "history_as_of": "2026-10-12T07:13:50.564710+00:00"
+      },
+      "glicko": {
+        "favorite": "Crescent",
+        "probability": 0.5546626794409111,
+        "radiant_probability": 0.445337320559089,
+        "correct": false,
+        "brier": 0.3076506879645709,
+        "history_as_of": "2026-10-12T07:13:50.564710+00:00"
+      }
+    },
+    {
+      "match_id": "9041259055",
+      "time_moscow": "2026-10-12T11:16:52.952029+03:00",
+      "league": "DreamLeague Season 30 Qualifiers",
+      "league_id": 20359,
+      "radiant": "Team Thailand",
+      "dire": "Team Kinetix",
+      "map": 1,
+      "winner": "Team Kinetix",
+      "separate_timing": true,
+      "published_model": "glicko-team-research-v1-aea4609b642d",
+      "published_correct": false,
+      "elo": {
+        "favorite": "Team Thailand",
+        "probability": 0.5533658070707519,
+        "radiant_probability": 0.5533658070707519,
+        "correct": false,
+        "brier": 0.3062137164350646,
+        "history_as_of": "2026-10-12T07:13:50.564710+00:00"
+      },
+      "glicko": {
+        "favorite": "Team Thailand",
+        "probability": 0.6038999818395052,
+        "radiant_probability": 0.6038999818395052,
+        "correct": false,
+        "brier": 0.36469518806575474,
+        "history_as_of": "2026-10-12T07:13:50.564710+00:00"
+      }
+    },
+    {
+      "match_id": "9041258212",
+      "time_moscow": "2026-10-12T11:22:28.852195+03:00",
+      "league": "DreamLeague Season 30 Qualifiers",
+      "league_id": 20359,
+      "radiant": "Team Nemesis Academy",
+      "dire": "Ivory",
+      "map": 1,
+      "winner": "Ivory",
+      "separate_timing": true,
+      "published_model": "glicko-team-research-v1-aea4609b642d",
+      "published_correct": false,
+      "elo": {
+        "favorite": "Team Nemesis Academy",
+        "probability": 0.5686111047792615,
+        "radiant_probability": 0.5686111047792615,
+        "correct": false,
+        "brier": 0.32331858847829226,
+        "history_as_of": "2026-10-12T07:13:50.564710+00:00"
+      },
+      "glicko": {
+        "favorite": "Team Nemesis Academy",
+        "probability": 0.5625531349549321,
+        "radiant_probability": 0.5625531349549321,
+        "correct": false,
+        "brier": 0.31646602964762205,
+        "history_as_of": "2026-10-12T07:13:50.564710+00:00"
+      }
+    },
+    {
+      "match_id": "9041304542",
+      "time_moscow": "2026-10-12T12:14:58.708151+03:00",
+      "league": "DreamLeague Season 30 Qualifiers",
+      "league_id": 20359,
+      "radiant": "Team Kinetix",
+      "dire": "Team Thailand",
+      "map": 2,
+      "winner": "Team Kinetix",
+      "separate_timing": true,
+      "published_model": "glicko-team-research-v1-aea4609b642d",
+      "published_correct": true,
+      "elo": {
+        "favorite": "Team Kinetix",
+        "probability": 0.5277150810444325,
+        "radiant_probability": 0.5277150810444325,
+        "correct": true,
+        "brier": 0.2230530446728669,
+        "history_as_of": "2026-10-12T09:07:39.433512+00:00"
+      },
+      "glicko": {
+        "favorite": "Team Kinetix",
+        "probability": 0.6144950299998017,
+        "radiant_probability": 0.6144950299998017,
+        "correct": true,
+        "brier": 0.1486140818948538,
+        "history_as_of": "2026-10-12T09:07:39.433512+00:00"
+      }
+    },
+    {
+      "match_id": "9041325002",
+      "time_moscow": "2026-10-12T12:35:16.144641+03:00",
+      "league": "DreamLeague Season 30 Qualifiers",
+      "league_id": 20359,
+      "radiant": "Ivory",
+      "dire": "Team Nemesis Academy",
+      "map": 2,
+      "winner": "Team Nemesis Academy",
+      "separate_timing": true,
+      "published_model": "glicko-team-research-v1-aea4609b642d",
+      "published_correct": false,
+      "elo": {
+        "favorite": "Ivory ",
+        "probability": 0.5276829477547658,
+        "radiant_probability": 0.5276829477547658,
+        "correct": false,
+        "brier": 0.27844929335115887,
+        "history_as_of": "2026-10-12T09:15:04.129765+00:00"
+      },
+      "glicko": {
+        "favorite": "Ivory ",
+        "probability": 0.6229529177156169,
+        "radiant_probability": 0.6229529177156169,
+        "correct": false,
+        "brier": 0.38807033769040017,
+        "history_as_of": "2026-10-12T09:15:04.129765+00:00"
+      }
+    },
+    {
+      "match_id": "9041416365",
+      "time_moscow": "2026-10-12T14:18:58.826917+03:00",
+      "league": "DreamLeague Season 30 Qualifiers",
+      "league_id": 20359,
+      "radiant": "Ivory",
+      "dire": "Team Nemesis Academy",
+      "map": 3,
+      "winner": "Ivory",
+      "separate_timing": true,
+      "published_model": "glicko-team-research-v1-aea4609b642d",
+      "published_correct": true,
+      "elo": {
+        "favorite": "Ivory ",
+        "probability": 0.5594831564975741,
+        "radiant_probability": 0.5594831564975741,
+        "correct": true,
+        "brier": 0.19405508940934083,
+        "history_as_of": "2026-10-12T10:42:52.957436+00:00"
+      },
+      "glicko": {
+        "favorite": "Ivory ",
+        "probability": 0.5227706296106032,
+        "radiant_probability": 0.5227706296106032,
+        "correct": true,
+        "brier": 0.22774787196226012,
+        "history_as_of": "2026-10-12T10:42:52.957436+00:00"
+      }
+    },
+    {
+      "match_id": "9041580095",
+      "time_moscow": "2026-10-12T16:21:36.346376+03:00",
+      "league": "EPL Masters 2026",
+      "league_id": 19944,
+      "radiant": "CyberHero",
+      "dire": "Team Lynx",
+      "map": 1,
+      "winner": "CyberHero",
+      "separate_timing": true,
+      "published_model": "glicko-team-research-v1-aea4609b642d",
+      "published_correct": false,
+      "elo": {
+        "favorite": "CyberHero",
+        "probability": 0.5087226401629115,
+        "radiant_probability": 0.5087226401629115,
+        "correct": true,
+        "brier": 0.24135344428850017,
+        "history_as_of": "2026-10-12T12:02:26.624704+00:00"
+      },
+      "glicko": {
+        "favorite": "Team Lynx",
+        "probability": 0.5235459214492976,
+        "radiant_probability": 0.47645407855070243,
+        "correct": false,
+        "brier": 0.27410033186619404,
+        "history_as_of": "2026-10-12T12:02:26.624704+00:00"
+      }
+    },
+    {
+      "match_id": "9041588706",
+      "time_moscow": "2026-10-12T16:21:40.011482+03:00",
+      "league": "DreamLeague Season 30 Qualifiers",
+      "league_id": 20359,
+      "radiant": "Nemiga Gaming",
+      "dire": "111",
+      "map": 1,
+      "winner": "Nemiga Gaming",
+      "separate_timing": true,
+      "published_model": "glicko-team-research-v1-aea4609b642d",
+      "published_correct": false,
+      "elo": {
+        "favorite": "111",
+        "probability": 0.5508729520614677,
+        "radiant_probability": 0.4491270479385323,
+        "correct": false,
+        "brier": 0.3034610093129161,
+        "history_as_of": "2026-10-12T12:02:26.624704+00:00"
+      },
+      "glicko": {
+        "favorite": "111",
+        "probability": 0.5050395182906691,
+        "radiant_probability": 0.4949604817093309,
+        "correct": false,
+        "brier": 0.25506491503527107,
+        "history_as_of": "2026-10-12T12:02:26.624704+00:00"
+      }
+    },
+    {
+      "match_id": "9041689216",
+      "time_moscow": "2026-10-12T17:16:49.116685+03:00",
+      "league": "DreamLeague Season 30 Qualifiers",
+      "league_id": 20359,
+      "radiant": "111",
+      "dire": "Nemiga Gaming",
+      "map": 2,
+      "winner": "Nemiga Gaming",
+      "separate_timing": true,
+      "published_model": "glicko-team-research-v1-aea4609b642d",
+      "published_correct": true,
+      "elo": {
+        "favorite": "111",
+        "probability": 0.622167901442738,
+        "radiant_probability": 0.622167901442738,
+        "correct": false,
+        "brier": 0.38709289758566057,
+        "history_as_of": "2026-10-12T14:05:32.832485+00:00"
+      },
+      "glicko": {
+        "favorite": "Nemiga Gaming",
+        "probability": 0.5149743672982012,
+        "radiant_probability": 0.4850256327017988,
+        "correct": true,
+        "brier": 0.23524986437778025,
+        "history_as_of": "2026-10-12T14:05:32.832485+00:00"
+      }
+    },
+    {
+      "match_id": "9041695822",
+      "time_moscow": "2026-10-12T17:22:41.145823+03:00",
+      "league": "DreamLeague Season 30 Qualifiers",
+      "league_id": 20359,
+      "radiant": "Old blood",
+      "dire": "WhiteSails",
+      "map": 1,
+      "winner": "WhiteSails",
+      "separate_timing": true,
+      "published_model": "glicko-team-research-v1-aea4609b642d",
+      "published_correct": true,
+      "elo": {
+        "favorite": "WhiteSails",
+        "probability": 0.5324073832852568,
+        "radiant_probability": 0.46759261671474317,
+        "correct": true,
+        "brier": 0.2186428552061407,
+        "history_as_of": "2026-10-12T14:05:32.832485+00:00"
+      },
+      "glicko": {
+        "favorite": "WhiteSails",
+        "probability": 0.5860532343326146,
+        "radiant_probability": 0.4139467656673855,
+        "correct": true,
+        "brier": 0.17135192480648934,
+        "history_as_of": "2026-10-12T14:05:32.832485+00:00"
+      }
+    },
+    {
+      "match_id": "9041695741",
+      "time_moscow": "2026-10-12T17:22:47.418973+03:00",
+      "league": "DreamLeague Season 30 Qualifiers",
+      "league_id": 20359,
+      "radiant": "Dawn Bulls",
+      "dire": "Mena Warriors",
+      "map": 1,
+      "winner": "Dawn Bulls",
+      "separate_timing": true,
+      "published_model": "glicko-team-research-v1-aea4609b642d",
+      "published_correct": true,
+      "elo": {
+        "favorite": "Dawn Bulls",
+        "probability": 0.5986116324129838,
+        "radiant_probability": 0.5986116324129838,
+        "correct": true,
+        "brier": 0.16111262163416967,
+        "history_as_of": "2026-10-12T14:05:32.832485+00:00"
+      },
+      "glicko": {
+        "favorite": "Dawn Bulls",
+        "probability": 0.800649302842192,
+        "radiant_probability": 0.800649302842192,
+        "correct": true,
+        "brier": 0.03974070045730406,
+        "history_as_of": "2026-10-12T14:05:32.832485+00:00"
+      }
+    },
+    {
+      "match_id": "9041711962",
+      "time_moscow": "2026-10-12T17:30:12.379352+03:00",
+      "league": "EPL Masters 2026",
+      "league_id": 19944,
+      "radiant": "Team Lynx",
+      "dire": "CyberHero",
+      "map": 2,
+      "winner": "Team Lynx",
+      "separate_timing": true,
+      "published_model": "glicko-team-research-v1-aea4609b642d",
+      "published_correct": false,
+      "elo": {
+        "favorite": "CyberHero",
+        "probability": 0.5658501897064803,
+        "radiant_probability": 0.43414981029351973,
+        "correct": false,
+        "brier": 0.3201864371908597,
+        "history_as_of": "2026-10-12T14:05:32.832485+00:00"
+      },
+      "glicko": {
+        "favorite": "CyberHero",
+        "probability": 0.5950857996664838,
+        "radiant_probability": 0.40491420033351627,
+        "correct": false,
+        "brier": 0.35412710896469846,
+        "history_as_of": "2026-10-12T14:05:32.832485+00:00"
+      }
+    },
+    {
+      "match_id": "9041800914",
+      "time_moscow": "2026-10-12T18:20:19.665877+03:00",
+      "league": "DreamLeague Season 30 Qualifiers",
+      "league_id": 20359,
+      "radiant": "Mena Warriors",
+      "dire": "Dawn Bulls",
+      "map": 2,
+      "winner": "Dawn Bulls",
+      "separate_timing": true,
+      "published_model": "logistic-v2-89bc7fac69d6",
+      "published_correct": true,
+      "elo": {
+        "favorite": "Dawn Bulls",
+        "probability": 0.580778052456936,
+        "radiant_probability": 0.41922194754306397,
+        "correct": true,
+        "brier": 0.17574704130179947,
+        "history_as_of": "2026-10-12T14:59:33.090616+00:00"
+      },
+      "glicko": {
+        "favorite": "Dawn Bulls",
+        "probability": 0.7864335351858495,
+        "radiant_probability": 0.21356646481415054,
+        "correct": true,
+        "brier": 0.0456106348932138,
+        "history_as_of": "2026-10-12T14:59:33.090616+00:00"
+      }
+    },
+    {
+      "match_id": "9041797807",
+      "time_moscow": "2026-10-12T18:22:06.981631+03:00",
+      "league": "EPL Masters 2026",
+      "league_id": 19944,
+      "radiant": "Team Lynx",
+      "dire": "CyberHero",
+      "map": 3,
+      "winner": "Team Lynx",
+      "separate_timing": true,
+      "published_model": "logistic-v2-89bc7fac69d6",
+      "published_correct": true,
+      "elo": {
+        "favorite": "Team Lynx",
+        "probability": 0.5304780647714399,
+        "radiant_probability": 0.5304780647714399,
+        "correct": true,
+        "brier": 0.2204508476607722,
+        "history_as_of": "2026-10-12T14:59:33.090616+00:00"
+      },
+      "glicko": {
+        "favorite": "Team Lynx",
+        "probability": 0.5370382079460673,
+        "radiant_probability": 0.5370382079460673,
+        "correct": true,
+        "brier": 0.21433362090178884,
+        "history_as_of": "2026-10-12T14:59:33.090616+00:00"
+      }
+    },
+    {
+      "match_id": "9041943103",
+      "time_moscow": "2026-10-12T19:50:03.331485+03:00",
+      "league": "EPL Masters 2026",
+      "league_id": 19944,
+      "radiant": "Team Lynx",
+      "dire": "Mena Warriors",
+      "map": 1,
+      "winner": "Team Lynx",
+      "separate_timing": true,
+      "published_model": "logistic-v2-89bc7fac69d6",
+      "published_correct": true,
+      "elo": {
+        "favorite": "Team Lynx",
+        "probability": 0.5573504291660624,
+        "radiant_probability": 0.5573504291660624,
+        "correct": true,
+        "brier": 0.19593864255946916,
+        "history_as_of": "2026-10-12T16:18:33.825709+00:00"
+      },
+      "glicko": {
+        "favorite": "Team Lynx",
+        "probability": 0.6479086915576012,
+        "radiant_probability": 0.6479086915576012,
+        "correct": true,
+        "brier": 0.1239682894806804,
+        "history_as_of": "2026-10-12T16:18:33.825709+00:00"
+      }
+    },
+    {
+      "match_id": "9042082112",
+      "time_moscow": "2026-10-12T21:06:45.521457+03:00",
+      "league": "EPL Masters 2026",
+      "league_id": 19944,
+      "radiant": "Mena Warriors",
+      "dire": "Team Lynx",
+      "map": 2,
+      "winner": "Team Lynx",
+      "separate_timing": true,
+      "published_model": "logistic-v2-89bc7fac69d6",
+      "published_correct": true,
+      "elo": {
+        "favorite": "Team Lynx",
+        "probability": 0.5339513261708058,
+        "radiant_probability": 0.4660486738291942,
+        "correct": true,
+        "brier": 0.21720136637795062,
+        "history_as_of": "2026-10-12T17:38:16.066565+00:00"
+      },
+      "glicko": {
+        "favorite": "Team Lynx",
+        "probability": 0.6501853788622569,
+        "radiant_probability": 0.34981462113774314,
+        "correct": true,
+        "brier": 0.12237026916174278,
+        "history_as_of": "2026-10-12T17:38:16.066565+00:00"
+      }
+    },
+    {
+      "match_id": "9042204645",
+      "time_moscow": "2026-10-12T22:27:31.282993+03:00",
+      "league": "EPL Masters 2026",
+      "league_id": 19944,
+      "radiant": "Dawn Bulls",
+      "dire": "The Warriors",
+      "map": 1,
+      "winner": "The Warriors",
+      "separate_timing": true,
+      "published_model": "logistic-v2-89bc7fac69d6",
+      "published_correct": false,
+      "elo": {
+        "favorite": "Dawn Bulls",
+        "probability": 0.6094738171950732,
+        "radiant_probability": 0.6094738171950732,
+        "correct": false,
+        "brier": 0.37145833384633353,
+        "history_as_of": "2026-10-12T17:38:16.066565+00:00"
+      },
+      "glicko": {
+        "favorite": "Dawn Bulls",
+        "probability": 0.736393826012058,
+        "radiant_probability": 0.736393826012058,
+        "correct": false,
+        "brier": 0.5422758669886772,
+        "history_as_of": "2026-10-12T17:38:16.066565+00:00"
+      }
+    },
+    {
+      "match_id": "9042286563",
+      "time_moscow": "2026-10-12T23:26:39.669419+03:00",
+      "league": "EPL Masters 2026",
+      "league_id": 19944,
+      "radiant": "Dawn Bulls",
+      "dire": "The Warriors",
+      "map": 2,
+      "winner": "Dawn Bulls",
+      "separate_timing": true,
+      "published_model": "logistic-v2-89bc7fac69d6",
+      "published_correct": true,
+      "elo": {
+        "favorite": "Dawn Bulls",
+        "probability": 0.6165601130431811,
+        "radiant_probability": 0.6165601130431811,
+        "correct": true,
+        "brier": 0.14702614690945803,
+        "history_as_of": "2026-10-12T19:55:08.511128+00:00"
+      },
+      "glicko": {
+        "favorite": "Dawn Bulls",
+        "probability": 0.6276730733151653,
+        "radiant_probability": 0.6276730733151653,
+        "correct": true,
+        "brier": 0.13862734033457427,
+        "history_as_of": "2026-10-12T19:55:08.511128+00:00"
+      }
+    }
+  ]
+}
