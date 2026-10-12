@@ -18,6 +18,12 @@ USER_AGENT = "Betbot/0.1 (https://github.com/COMF2222/betbot; contact: https://g
 MONTHS = {m: i for i, m in enumerate("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(), 1)}
 
 
+def tournament_notice_window(now=None):
+    today = (now or utcnow()).astimezone(MOSCOW).date()
+    next_month = (today.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return today.isoformat(), (next_month - timedelta(days=1)).isoformat()
+
+
 def calendar_dates(text):
     """Dates printed by Liquipedia's tournament tables, including year boundaries."""
     text = " ".join(text.split())

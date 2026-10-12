@@ -39,7 +39,7 @@ from .providers import (
 )
 from .storage import Store
 from .timing import draft_timing, separate_timing
-from .tournaments import Liquipedia, enrich_markets
+from .tournaments import Liquipedia, enrich_markets, tournament_notice_window
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +47,9 @@ log = logging.getLogger(__name__)
 class Service:
     def __init__(self, settings: Settings, store: Store, bot: Bot | None = None):
         self.settings, self.store, self.bot = settings, store, bot
+        if self.store.get("tournament_alert_window") != "calendar_month":
+            self.store.rearm_distant_tournament_notices(tournament_notice_window()[1])
+            self.store.set("tournament_alert_window", "calendar_month")
         if not self.store.get("destinations_migrated", False):
             legacy = self.store.get("chat_id", settings.telegram_chat_id)
             if legacy:
@@ -227,12 +230,12 @@ class Service:
         self.tournament_task = asyncio.create_task(self.refresh_tournaments())
         return self.tournament_task
 
-    async def notify_tournaments(self):
+    async def notify_tournaments(self, repeat=False):
         from .admin_ui import tournament_alert
 
         if not self.bot:
             return
-        today = utcnow().astimezone(MOSCOW).date().isoformat()
+        today, until = tournament_notice_window(utcnow())
         events = sorted(
             self.store.tournaments(), key=lambda event: (event["start_date"], event["id"])
         )
@@ -243,17 +246,19 @@ class Service:
                 if (
                     event["tier"] not in (1, 2)
                     or event["end_date"] < today
+                    or event["start_date"] > until
                     or event["enabled"]
+                    and not repeat
                     or verified is not None
                     and event["source_key"] not in verified
                 ):
                     continue
                 notice = self.store.tournament_notice(event["id"], admin)
-                if notice and notice["state"] == "failed":
+                if notice and notice["state"] == "failed" and not repeat:
                     updated = timestamp(notice["updated_at"])
                     if updated and (utcnow() - updated).total_seconds() < 1800:
                         continue
-                if not self.store.begin_tournament_notice(event["id"], admin):
+                if not self.store.begin_tournament_notice(event["id"], admin, repeat=repeat):
                     continue
                 screen = tournament_alert(self, event["id"], admin)
                 try:
@@ -272,8 +277,10 @@ class Service:
                     self.store.health("Уведомления о турнирах", False, type(exc).__name__)
                     break
                 sent += 1
-                if sent >= 3:
+                if sent >= 3 and not repeat:
                     break
+                if repeat:
+                    await asyncio.sleep(1)
 
     async def refresh_catalog(self):
         try:
@@ -1124,7 +1131,10 @@ class Service:
             await self.track_market_prices()
             await self.morning_brief()
             await self.reports()
-            await self.notify_tournaments()
+            repeat = self.store.get("tournament_alert_repeat_requested", False)
+            if repeat:
+                self.store.set("tournament_alert_repeat_requested", False)
+            await self.notify_tournaments(repeat=repeat)
 
     async def run(self):
         from .runtime import heartbeat

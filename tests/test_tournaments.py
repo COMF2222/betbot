@@ -16,6 +16,7 @@ from betbot.tournaments import (
     event_status,
     infobox_fields,
     parse_calendar,
+    tournament_notice_window,
 )
 
 NOW = datetime(2026, 10, 12, 8, tzinfo=UTC)
@@ -260,3 +261,96 @@ async def test_liquipedia_rate_limits_parse_requests_and_does_not_retry_http_fai
         await provider.query(action="parse", page="Tier_2_Tournaments")
     sleep.assert_awaited_once_with(30.1)
     assert client.get.call_args.kwargs["headers"]["User-Agent"] == USER_AGENT
+
+
+@pytest.mark.parametrize(
+    "now,expected",
+    [
+        (datetime(2026, 10, 12, 8, tzinfo=UTC), ("2026-10-12", "2026-10-31")),
+        (datetime(2026, 10, 31, 22, tzinfo=UTC), ("2026-11-01", "2026-11-30")),
+        (datetime(2028, 2, 12, 8, tzinfo=UTC), ("2028-02-12", "2028-02-29")),
+    ],
+)
+def test_notice_window_ends_at_calendar_month_end_in_moscow(now, expected):
+    assert tournament_notice_window(now) == expected
+
+
+async def test_alerts_cover_current_month_and_ongoing_events_only(tournament_service, monkeypatch):
+    svc = tournament_service
+    events = [
+        {
+            **EVENT,
+            "source_key": "liquipedia:Ongoing",
+            "name": "Ongoing",
+            "start_date": "2026-09-30",
+            "end_date": "2026-10-13",
+        },
+        {
+            **EVENT,
+            "source_key": "liquipedia:LastDay",
+            "name": "LastDay",
+            "start_date": "2026-10-31",
+            "end_date": "2026-11-02",
+        },
+        {
+            **EVENT,
+            "source_key": "liquipedia:November",
+            "name": "November",
+            "start_date": "2026-11-01",
+            "end_date": "2026-11-07",
+        },
+        {
+            **EVENT,
+            "source_key": "liquipedia:Old",
+            "name": "Old",
+            "start_date": "2026-10-01",
+            "end_date": "2026-10-11",
+        },
+    ]
+    svc.liquipedia.tournaments.return_value = events
+    await svc.refresh_tournaments()
+    await svc.notify_tournaments()
+    calls = svc.bot.send_message.call_args_list
+    assert len(calls) == 4
+    assert all("Ongoing" in call.args[1] or "LastDay" in call.args[1] for call in calls)
+    assert len(svc.store.tournaments()) == 4
+    assert svc.store.tournament_notice(3, 1) is None
+    monkeypatch.setattr("betbot.service.utcnow", lambda: datetime(2026, 11, 1, 8, tzinfo=UTC))
+    await svc.notify_tournaments()
+    assert svc.bot.send_message.await_count == 6
+    assert "November" in svc.bot.send_message.call_args.args[1]
+
+
+async def test_old_distant_alert_can_return_in_its_month_without_overriding_skip(
+    tournament_service,
+):
+    svc = tournament_service
+    svc.store.remember_tournament({**EVENT, "start_date": "2026-11-01", "end_date": "2026-11-07"})
+    for admin in (1, 2, 3):
+        svc.store.begin_tournament_notice(1, admin)
+        svc.store.finish_tournament_notice(1, admin, "sent", 91)
+    svc.store.decide_tournament(1, 2, "skipped")
+    svc.store.finish_tournament_notice(1, 3, "uncertain")
+    svc.store.rearm_distant_tournament_notices("2026-10-31")
+    assert svc.store.tournament_notice(1, 1)["state"] == "planned"
+    assert svc.store.tournament_notice(1, 1)["message_id"] == 91
+    assert svc.store.tournament_notice(1, 2)["state"] == "sent"
+    assert svc.store.tournament_notice(1, 2)["decision"] == "skipped"
+    assert svc.store.tournament_notice(1, 3)["state"] == "uncertain"
+
+
+async def test_requested_repeat_includes_selected_tournament_and_preserves_decision(
+    tournament_service, monkeypatch
+):
+    svc = tournament_service
+    await svc.refresh_tournaments()
+    await svc.notify_tournaments()
+    svc.store.watch_tournament(1)
+    svc.store.decide_tournament(1, 1, "watched")
+    monkeypatch.setattr("betbot.service.asyncio.sleep", AsyncMock())
+    await svc.notify_tournaments(repeat=True)
+    assert svc.bot.send_message.await_count == 4
+    assert svc.store.enabled(777)
+    assert svc.store.tournament_notice(1, 1)["decision"] == "watched"
+    await svc.notify_tournaments()
+    assert svc.bot.send_message.await_count == 4

@@ -226,10 +226,27 @@ class Store:
         ).fetchone()
         return dict(row) if row else None
 
-    def begin_tournament_notice(self, identity, admin):
+    def rearm_distant_tournament_notices(self, until):
+        """Old wide-window alerts may be offered once when their month arrives."""
+        distant = [
+            row["id"]
+            for row in self.db.execute("SELECT id,payload FROM tournaments")
+            if json.loads(row["payload"])["start_date"] > until
+        ]
+        with self.db:
+            self.db.executemany(
+                "UPDATE tournament_notices SET state='planned' WHERE tournament_id=? AND state='sent' AND decision IS NULL",
+                [(identity,) for identity in distant],
+            )
+
+    def begin_tournament_notice(self, identity, admin, repeat=False):
         with self.db:
             row = self.tournament_notice(identity, admin)
-            if row and (row["state"] not in ("planned", "failed") or row["decision"]):
+            if row and (
+                row["state"] in ("sending", "uncertain")
+                or not repeat
+                and (row["state"] not in ("planned", "failed") or row["decision"])
+            ):
                 return False
             self.db.execute(
                 "INSERT INTO tournament_notices(tournament_id,admin_id,state,updated_at) VALUES (?,?,'sending',?) ON CONFLICT(tournament_id,admin_id) DO UPDATE SET state='sending',updated_at=excluded.updated_at",

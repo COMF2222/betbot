@@ -9,7 +9,7 @@ from .domain import utcnow
 from .leagues import league_rows
 from .presentation import MOSCOW, esc, stats_text
 from .providers import BOOKMAKERS
-from .tournaments import event_status
+from .tournaments import event_status, tournament_notice_window
 
 
 @dataclass
@@ -236,7 +236,7 @@ def tournament_alert(service, identity, admin, notice="", catalog=False, page=0)
     return panel(text, buttons, f"ui:tournaments:{page}")
 
 
-def tournament_catalog(service, admin, page=0):
+def tournament_catalog(service, admin, page=0, notice=""):
     today = utcnow().astimezone(MOSCOW).date().isoformat()
     events = sorted(
         service.store.tournaments(),
@@ -244,7 +244,9 @@ def tournament_catalog(service, admin, page=0):
     )
     page = max(0, min(page, max(0, (len(events) - 1) // 7)))
     rows = events[page * 7 : (page + 1) * 7]
-    text = "📅 <b>Каталог · Tier 1 и Tier 2</b>\n\nПропущенные турниры остаются здесь. Выберите событие, чтобы включить отслеживание."
+    text = "📅 <b>Каталог · Tier 1 и Tier 2</b>\n\nУведомления — об идущих турнирах и стартах до конца текущего месяца. Дальние и пропущенные турниры остаются здесь; их можно включить вручную."
+    if notice:
+        text += f"\n\n{esc(notice, 200)}"
     if not rows:
         text += "\n\nПроверяем календарь Liquipedia. Новые турниры появятся здесь и придут в личный чат."
     buttons = []
@@ -269,6 +271,10 @@ def tournament_catalog(service, admin, page=0):
     if paging:
         buttons.append(paging)
     buttons.append([button("↻ Проверить новые турниры", f"ui:tournament-refresh:{page}")])
+    until = datetime.fromisoformat(tournament_notice_window()[1])
+    buttons.append(
+        [button(f"🔔 Прислать турниры до {until:%d.%m}", f"ui:tournament-repeat:{page}")]
+    )
     return panel(text, buttons, "ui:home")
 
 

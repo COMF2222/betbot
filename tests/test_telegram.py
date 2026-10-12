@@ -269,6 +269,14 @@ async def test_new_tournament_can_be_skipped_and_enabled_later_from_catalog(rout
     assert "Отслеживание включено" in session.requests[-1].text
 
 
+async def test_private_admin_can_request_current_month_alerts_again(routed_bot):
+    bot, dispatcher, service, session = routed_bot
+    service.store.set("tournament_catalog_checked_at", utcnow().isoformat())
+    await press(bot, dispatcher, "ui:tournament-repeat:0")
+    assert service.store.get("tournament_alert_repeat_requested") is True
+    assert "до конца месяца" in session.requests[-1].text
+
+
 @pytest.mark.parametrize("user_id,chat_id,chat_type", [(1, -100, "supergroup"), (7, 7, "private")])
 async def test_tournament_action_requires_private_admin_chat(
     routed_bot, user_id, chat_id, chat_type

@@ -736,6 +736,7 @@ def build_router(service: Service) -> Router:
         if action in (
             "tournaments",
             "tournament-refresh",
+            "tournament-repeat",
             "event",
             "event-watch",
             "event-skip",
@@ -755,10 +756,15 @@ def build_router(service: Service) -> Router:
             for view in ("current", "selected", "archive"):
                 service.store.set(f"ui_filter:{user_id}:{view}", "")
             screen = ui.home(service)
-        elif action in ("tournaments", "tournament-refresh"):
+        elif action in ("tournaments", "tournament-refresh", "tournament-repeat"):
             page = max(0, int(args[2]))
             service.start_tournament_refresh(force=action == "tournament-refresh")
-            screen = ui.tournament_catalog(service, user_id, page)
+            notice = ""
+            if action == "tournament-repeat":
+                service.store.set("tournament_alert_repeat_requested", True)
+                service.store.audit("tournament-repeat", str(user_id))
+                notice = "Повторный список до конца месяца придёт в личный чат."
+            screen = ui.tournament_catalog(service, user_id, page, notice)
         elif action in ("event", "event-watch", "event-skip", "event-unwatch"):
             identity, page = int(args[2]), max(0, int(args[3]))
             notice = ""
