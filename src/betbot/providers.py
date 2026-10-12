@@ -440,8 +440,24 @@ class Polymarket:
                 continue
             if abs((draft.observed_at - start).total_seconds()) <= 12 * 3600:
                 candidates.append(event)
-        # Name/date matches are suggestions. They never authorize attaching prices.
+        # The caller also verifies tournament identity before automatic binding.
         return candidates[0] if len(candidates) == 1 else None
+
+    @staticmethod
+    def tournament_matches(event: dict, league_name: str) -> bool:
+        """Match a known Dota ticket to tournament metadata, ignoring edition numbers."""
+        words = re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", league_name).casefold())
+        ignored = {"season", "сезон", "the", "by"}
+        words = [w for w in words if not w.isdigit() and w not in ignored]
+        if not words or not any(len(w) >= 4 for w in words):
+            return False
+        metadata = event.get("eventMetadata") or {}
+        label = " ".join(
+            [str(event.get("title", ""))]
+            + [str(metadata.get(k, "")) for k in ("league", "serie", "tournament")]
+        )
+        actual = set(re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", label).casefold()))
+        return set(words) <= actual
 
     @staticmethod
     def map_market(raw: dict, map_number: int) -> bool:
@@ -510,6 +526,10 @@ class Polymarket:
                     ask_odds=ask_odds,
                 )
             )
+        # Last trades can be stale or inconsistent after settlement even while Gamma
+        # still marks the market open. Never display two mutually exclusive 99% prices.
+        if len(result) == 2 and abs(sum(1 / q.odds for q in result) - 1) > 0.10 + 1e-9:
+            return []
         return result
 
     async def history(self, quotes, start, end):

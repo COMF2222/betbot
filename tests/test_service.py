@@ -59,6 +59,86 @@ async def test_collect_creates_once_and_default_is_preview(service, draft):
     assert service.store.forecast(id_)["state"] == "preview"
 
 
+async def test_known_league_gets_exact_map_quotes_without_manual_filter(service, draft):
+    from betbot.domain import Quote
+
+    service.store.league(draft.league_id, "EPL Masters 2026 ", True)
+    event = {
+        "id": "7",
+        "title": "Team A vs Team B - EPL Masters Play-In",
+        "teams": [{"name": draft.radiant_name}, {"name": draft.dire_name}],
+        "startTime": draft.observed_at.isoformat(),
+    }
+    q = Quote("Polymarket", draft.match_id, "map_winner", "radiant", 1.8, utcnow(), None, 2)
+    service.poly.discover = AsyncMock(return_value=[event])
+    service.poly.event = AsyncMock(return_value=event)
+    service.poly.quotes = AsyncMock(return_value=[q])
+    assert await Service.collect_quotes(service, draft) == [q]
+    assert service.store.get(f"poly:{draft.match_id}") == "7"
+    service.poly.event.assert_awaited_once_with("7")
+
+
+async def test_tournament_check_disambiguates_same_team_pairs(service, draft):
+    service.store.league(draft.league_id, "EPL Masters 2026 ", True)
+    base = {
+        "id": "7",
+        "teams": [{"name": draft.radiant_name}, {"name": draft.dire_name}],
+        "startTime": draft.observed_at.isoformat(),
+    }
+    right, wrong = {**base, "title": "EPL Masters"}, {**base, "id": "8", "title": "DreamLeague"}
+    assert service.automatic_market_event(draft, [wrong, right], {}) == right
+    assert service.automatic_market_event(draft, [wrong], {}) is None
+    assert service.automatic_market_event(draft, [right, {**right, "id": "9"}], {}) is None
+    service.store.set(f"poly_league:{draft.league_id}", "")
+    assert service.automatic_market_event(draft, [right], {}) is None
+    service.store.set(f"poly_league:{draft.league_id}", "DreamLeague")
+    assert service.automatic_market_event(draft, [wrong, right], {}) == wrong
+
+
+async def test_shadow_records_before_outcome_and_never_changes_public_prediction(
+    service, draft, prediction
+):
+    service.shadow_model = SimpleNamespace(
+        ready=True,
+        reload=lambda: None,
+        raw={
+            "version": "shadow-v1",
+            "history_cutoff": "2020-01-01T00:00:00Z",
+            "history": History().export(),
+        },
+        predict=lambda d, **kw: replace(
+            prediction,
+            draft=d,
+            model_version="shadow-v1",
+            radiant_probability=0.4,
+            history_as_of=kw["history_as_of"],
+        ),
+    )
+    identity = await service.process_draft(draft)
+    original = service.store.forecast(identity)["payload"]
+    assert json.loads(original)["radiant_probability"] == 0.58
+    shadow = service.store.get(f"shadow_forecast:{draft.match_id}")
+    assert shadow["radiant_probability"] == 0.4
+    assert shadow["compared_to"] == prediction.model_version
+    service.store.result(draft.match_id, {"radiant_win": True})
+    service.record_shadow(prediction)
+    assert service.store.get(f"shadow_forecast:{draft.match_id}") == shadow
+    assert service.store.forecast(identity)["payload"] == original
+    assert not service.store.get("online_history")  # Shadow history has a separate key.
+
+
+async def test_shadow_failure_cannot_stop_forecast_publication(service, draft):
+    service.shadow_model = SimpleNamespace(
+        reload=lambda: (_ for _ in ()).throw(ValueError("bad model"))
+    )
+    assert await service.process_draft(draft)
+    assert not service.store.get(f"shadow_forecast:{draft.match_id}")
+    assert any(
+        row["source"] == "Сравнение моделей" and not row["ok"]
+        for row in service.store.health_rows()
+    )
+
+
 async def test_missing_quotes_are_added_to_the_same_post_without_changing_the_forecast(
     service, draft
 ):

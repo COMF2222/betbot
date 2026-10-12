@@ -79,10 +79,16 @@ class Service:
             else None
         )
         self.model = Model(settings.model_path)
+        self.shadow_model = (
+            Model(settings.shadow_model_path)
+            if settings.shadow_model_path and settings.shadow_model_path != settings.model_path
+            else None
+        )
         self.heroes: dict[int, dict] = {}
         self.player_names: dict[int, str] = {}
         self.patches = self.store.get("patches", [])
         self.live_state = None
+        self.shadow_live_state = None
         self.tick_count = 0
         self.tick_lock = asyncio.Lock()
         self.activity_lock = asyncio.Lock()
@@ -373,25 +379,32 @@ class Service:
                 )
             self.store.set("league_activity_checked_at", utcnow().isoformat())
 
-    def online_history(self, observed_at):
+    def online_history(self, observed_at, model=None):
         """Persist causal updates, so restart doesn't forget earlier completed games."""
-        version = self.model.raw["version"]
-        if not self.live_state or self.live_state["version"] != version:
-            saved = self.store.get("online_history")
-            self.live_state = (
+        model = model or self.model
+        active = model is self.model
+        version = model.raw["version"]
+        key = "online_history" if active else f"shadow_history:{version}"
+        state = self.live_state if active else self.shadow_live_state
+        if not state or state["version"] != version:
+            saved = self.store.get(key)
+            state = (
                 saved
                 if saved and saved.get("version") == version
                 else {
                     "version": version,
-                    "history": self.model.raw["history"],
+                    "history": model.raw["history"],
                     "applied": [],
-                    "as_of": self.model.raw["history_cutoff"],
+                    "as_of": model.raw["history_cutoff"],
                 }
             )
-        state = self.live_state
+        if active:
+            self.live_state = state
+        else:
+            self.shadow_live_state = state
         history = History(state["history"])
         applied = set(state["applied"])
-        cutoff = timestamp(self.model.raw["history_cutoff"])
+        cutoff = timestamp(model.raw["history_cutoff"])
         pending = []
         for row in self.store.finished():
             if row["id"] in applied:
@@ -419,8 +432,59 @@ class Service:
                 state["as_of"] = max(timestamp(state["as_of"]), available).isoformat()
             state["history"] = history.export()
             state["applied"] = sorted(applied)
-            self.store.set("online_history", state)
+            self.store.set(key, state)
         return history, state["as_of"]
+
+    def record_shadow(self, prediction):
+        """Record a candidate before the outcome, without changing published forecasts."""
+        model = self.shadow_model
+        if not model:
+            return
+        try:
+            model.reload()
+            if not model.ready or model.raw["version"] == prediction.model_version:
+                return
+            key = f"shadow_forecast:{prediction.draft.match_id}"
+            if self.store.get(key):
+                return
+            history, as_of = self.online_history(prediction.draft.observed_at, model=model)
+            shadow = model.predict(prediction.draft, history=history, history_as_of=as_of)
+            self.store.set(
+                key,
+                {
+                    "model_version": shadow.model_version,
+                    "compared_to": prediction.model_version,
+                    "recorded_at": utcnow().isoformat(),
+                    "draft_observed_at": prediction.draft.observed_at.isoformat(),
+                    "history_as_of": shadow.history_as_of,
+                    "radiant_probability": shadow.radiant_probability,
+                    "draft_probability": shadow.draft_probability,
+                    "threshold": self.min_probability,
+                },
+            )
+            self.store.health("Сравнение моделей", True, "Параллельный прогноз сохранён")
+        except Exception as exc:
+            self.store.health("Сравнение моделей", False, type(exc).__name__)
+
+    def automatic_market_event(self, draft, events, aliases):
+        # Manual restrictions take priority, including an explicitly empty filter.
+        override = self.store.get(f"poly_league:{draft.league_id}")
+        keywords = self.market_keywords(draft.league_id, draft.observed_at)
+        league_name = next(
+            (r["name"] for r in self.store.leagues() if r["id"] == draft.league_id), ""
+        )
+        candidates = []
+        for event in events:
+            if override is not None or keywords:
+                verified = any(
+                    normalized(keyword) in normalized(event.get("title", ""))
+                    for keyword in keywords
+                )
+            else:
+                verified = self.poly.tournament_matches(event, league_name)
+            if verified:
+                candidates.append(event)
+        return self.poly.find_event(draft, candidates, aliases)
 
     async def hero_assets(self, draft: Draft):
         for player in draft.radiant + draft.dire:
@@ -452,19 +516,11 @@ class Service:
                     event = await self.poly.event(str(binding))
                 else:
                     events = await self.poly.discover()
-                    event = self.poly.find_event(draft, events, aliases)
-                    # A configured tournament keyword plus unique team/date pairing is
-                    # needed for automatic binding. Otherwise it remains an admin suggestion.
-                    keywords = self.market_keywords(draft.league_id, draft.observed_at)
-                    if (
-                        not event
-                        or not keywords
-                        or not any(
-                            normalized(keyword) in normalized(event.get("title", ""))
-                            for keyword in keywords
-                        )
-                    ):
-                        event = None
+                    event = self.automatic_market_event(draft, events, aliases)
+                    if event:
+                        # Discovery is cached for two minutes; refresh the matched event.
+                        current = await self.poly.event(str(event["id"]))
+                        event = self.automatic_market_event(draft, [current], aliases)
                 if event:
                     quotes.extend(await self.poly.quotes(draft, event, aliases))
                     if quotes and not binding:
@@ -632,6 +688,7 @@ class Service:
             p.duration_interval = None
         forecast_id = self.store.add_forecast(p)
         if forecast_id:
+            self.record_shadow(p)
             self.store.mark(draft.match_id, "preview", "")
             if self.automatic and not self.paused and self.model.publication_ready and self.chat_id:
                 await self.publish(forecast_id)

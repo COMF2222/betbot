@@ -140,6 +140,39 @@ def test_ambiguous_events_are_not_bound(draft):
     assert Polymarket.find_event(draft, [event, {**event, "id": "other"}]) is None
 
 
+@pytest.mark.parametrize(
+    "league,label,expected",
+    [
+        ("EPL Masters 2026 ", "EPL Masters Play-In Group A", True),
+        ("EPL Masters 2026 ", "European Pro League", False),
+        ("BLAST Slam", "BLAST Slam Playoffs", True),
+        ("DreamLeague Season 30 Qualifiers", "DreamLeague Qualifiers Europe", True),
+        ("DreamLeague Season 30 Qualifiers", "DreamLeague Finals", False),
+        ("", "EPL Masters", False),
+        ("2026", "EPL Masters 2026", False),
+    ],
+)
+def test_tournament_identity_is_required_even_when_edition_numbers_differ(league, label, expected):
+    assert Polymarket.tournament_matches({"eventMetadata": {"league": label}}, league) is expected
+
+
+async def test_conflicting_last_trades_are_not_displayed_as_two_favorites(draft):
+    provider = Polymarket(FakeHTTP({"last_trade_price": "0.99"}))
+    event = {
+        "markets": [
+            {
+                "id": "7",
+                "question": "Game 2 Winner",
+                "sportsMarketType": "child_moneyline",
+                "acceptingOrders": True,
+                "outcomes": [draft.radiant_name, draft.dire_name],
+                "clobTokenIds": ["a", "b"],
+            }
+        ]
+    }
+    assert await provider.quotes(draft, event) == []
+
+
 async def test_verified_aliases_match_the_exact_map_without_swapping_sides(draft):
     raw = replace(draft, radiant_name="Rottweilas", dire_name="The Bot^$")
     aliases = {str(raw.radiant_id): "Rottweilas Latam", str(raw.dire_id): "Skyreavers"}

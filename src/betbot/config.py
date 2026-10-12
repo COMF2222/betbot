@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     telegram_request_timeout_seconds: int = 20
     data_dir: Path = Path("data")
     model_path: Path = Path("data/model.json")
+    shadow_model_path: Path | None = None
     auto_publish: bool = False
     poll_seconds: int = 45
     max_draft_age_seconds: int = 180

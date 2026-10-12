@@ -5,6 +5,7 @@ WORKDIR /app
 COPY pyproject.toml README.md requirements.txt ./
 COPY src ./src
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt && pip install --no-cache-dir --no-deps . && groupadd --gid 10001 bot && useradd --uid 10001 --gid 10001 --create-home bot && mkdir -p /app/data && chown bot:bot /app/data
+COPY scripts/shadow_report.py ./scripts/shadow_report.py
 USER bot
 ENTRYPOINT ["python", "-m", "betbot.runtime"]
 CMD ["betbot", "run"]
