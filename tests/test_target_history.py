@@ -6,6 +6,7 @@ from test_model import history_rows
 from betbot.domain import timestamp
 from betbot.experiments import build_examples, candidate_partition, feature_view
 from betbot.model import chronological_split
+from betbot.presentation import MOSCOW
 from betbot.target_history import augment_target_features
 
 
@@ -14,8 +15,11 @@ def scope_for(rows):
         "events": [
             {
                 "league_id": 123,
-                "start_date": timestamp(rows[0]["start_time"]).date().isoformat(),
-                "end_date": timestamp(rows[-1]["start_time"]).date().isoformat(),
+                "start_date": timestamp(rows[0]["start_time"])
+                .astimezone(MOSCOW)
+                .date()
+                .isoformat(),
+                "end_date": timestamp(rows[-1]["start_time"]).astimezone(MOSCOW).date().isoformat(),
             }
         ]
     }

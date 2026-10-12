@@ -569,7 +569,10 @@ def build_router(service: Service) -> Router:
             len(args) not in (4, 5)
             or not args[1].isdigit()
             or not args[3].isdigit()
-            or args[2] not in ("forecast", "result", "explanation")
+            or (
+                args[2] not in ("forecast", "result", "explanation")
+                and not re.fullmatch(r"odds_alert:[1-9]\d*", args[2])
+            )
             or len(args) == 5
             and not re.fullmatch(r"-\d+", args[4])
         ):
@@ -823,6 +826,14 @@ def build_router(service: Service) -> Router:
             )
         elif action == "settings":
             screen = ui.publications(service)
+        elif action == "odds-alerts":
+            if len(args) > 2 and args[2] == "toggle":
+                service.store.set("odds_alerts_enabled", not service.odds_alerts_enabled)
+                service.store.audit("odds_alerts", f"{user_id}:{service.odds_alerts_enabled}")
+            elif len(args) > 3 and args[2] == "threshold" and int(args[3]) in (10, 20, 30):
+                service.store.set("odds_alert_relative_increase", int(args[3]) / 100)
+                service.store.audit("odds_alert_threshold", f"{user_id}:{int(args[3]) / 100}")
+            screen = ui.odds_alerts(service)
         elif action == "toggle":
             kind = args[2]
             key = {
@@ -1030,7 +1041,13 @@ def build_router(service: Service) -> Router:
                 )
                 screen = ui.panel(text, buttons, "ui:pending")
         elif action == "report-card":
-            from .reports import period_bounds, render_report, report_caption, report_payload
+            from .reports import (
+                period_bounds,
+                render_report,
+                report_caption,
+                report_payload,
+                weekly_caption,
+            )
 
             start_at, end_at, label = period_bounds(args[2])
             late = len(args) > 3 and args[3] == "delayed"
@@ -1039,7 +1056,7 @@ def build_router(service: Service) -> Router:
                 data["label"] += " · отдельный учёт"
             await callback.message.answer_photo(
                 BufferedInputFile(render_report(data), filename="report.png"),
-                caption=report_caption(data),
+                caption=weekly_caption(data) if args[2] == "week" else report_caption(data),
             )
             return
         else:

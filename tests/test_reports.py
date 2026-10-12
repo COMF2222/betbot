@@ -10,6 +10,53 @@ from betbot.reports import demo_report, market_pair, render_report, report_capti
 from betbot.storage import Store
 
 
+def test_weekly_caption_counts_every_confidence_bucket_and_quote_coverage(prediction):
+    from betbot.graphics import strength
+    from betbot.reports import totals, weekly_caption
+
+    data = demo_report()
+    entries = data["entries"][:4]
+    for entry, probability, won in zip(
+        entries, (0.52, 0.56, 0.60, 0.66), (True, True, False, False), strict=True
+    ):
+        entry.update(
+            probability=probability,
+            strength=strength(probability)[0],
+            correct=won,
+            prediction=replace(prediction, radiant_probability=probability),
+        )
+    entries[0]["market_probability"] = None
+    data.update(entries=entries, **totals(entries))
+    text = weekly_caption(data)
+    assert "2 из 4 за неделю" in text
+    assert "из 3 карт с кэфами" in text
+    assert "☆ 1 из 1" in text and "★ 1 из 1" in text and "★★ 0 из 1" in text
+    assert "★★★ и выше 0 из 1" in text
+    assert "Промах недели" in text and "66%" in text
+    assert len(text) < 1024
+
+
+def test_weekly_comeback_and_render_cover_closed_calendar_week():
+    from betbot.reports import weekly_caption
+
+    data = demo_report()
+    data.update(
+        label="Итоги недели",
+        date="2026-10-12",
+        until="2026-10-18T21:00:00+00:00",
+        comeback={
+            "team": "Cloud Dawning",
+            "opponent": "Cresent",
+            "map_number": 1,
+            "date": "10.10",
+            "probability": 0.03,
+        },
+    )
+    assert "Камбэк недели: Cloud Dawning против Cresent, карта 1 (10.10)" in weekly_caption(data)
+    assert "рынок давал им 3%" in weekly_caption(data)
+    assert Image.open(io.BytesIO(render_report(data))).size == (1280, 720)
+
+
 def published(store, prediction, result):
     store.observe(prediction.draft, "observed")
     identity = store.add_forecast(prediction)

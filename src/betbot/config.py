@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     morning_brief_enabled: bool = True
     morning_brief_hour: int = 10
     quote_max_age_seconds: int = 30
+    odds_alerts_enabled: bool = True
+    odds_alert_relative_increase: float = 0.20
+    odds_alert_min_increase: float = 0.20
+    odds_alert_cooldown_seconds: int = 600
+    odds_alert_max_per_map: int = 3
     opendota_api_key: str = ""
     steam_api_key: str = ""
     oddspapi_api_key: str = ""
@@ -48,11 +53,20 @@ class Settings(BaseSettings):
         "max_draft_age_seconds",
         "quote_max_age_seconds",
         "telegram_request_timeout_seconds",
+        "odds_alert_cooldown_seconds",
+        "odds_alert_max_per_map",
     )
     @classmethod
     def positive(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("Значение должно быть положительным")
+        return value
+
+    @field_validator("odds_alert_relative_increase", "odds_alert_min_increase")
+    @classmethod
+    def price_increase(cls, value: float) -> float:
+        if not 0 < value <= 10:
+            raise ValueError("Порог изменения кэфа должен быть положительным и не больше 10")
         return value
 
     @field_validator("min_favorite_probability")

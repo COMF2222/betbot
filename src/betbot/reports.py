@@ -47,6 +47,8 @@ def market_pair(quotes):
         ):
             continue
         r, d = 1 / pair["radiant"].odds, 1 / pair["dire"].odds
+        if key[6] == "market" and abs(r + d - 1) > 0.10 + 1e-9:
+            continue
         return {
             "radiant": r if key[6] == "market" else r / (r + d),
             "dire": d if key[6] == "market" else d / (r + d),
@@ -183,6 +185,11 @@ def report_payload(store, since, until, label="Итоги дня", destination=N
             ):
                 comeback = {
                     "team": team,
+                    "opponent": prediction.draft.dire_name
+                    if winner == "radiant"
+                    else prediction.draft.radiant_name,
+                    "map_number": prediction.draft.map_number,
+                    "date": prediction.draft.observed_at.astimezone(MOSCOW).strftime("%d.%m"),
                     "label": entry["label"],
                     "probability": pair[winner],
                     "odds": pair["quotes"][winner].odds,
@@ -262,6 +269,69 @@ def public_report_payload(store, since, until, label="Итоги дня", destin
     return early
 
 
+def weekly_caption(data):
+    """Compact weekly recap with honest quote coverage and all confidence buckets."""
+    from .presentation import stars
+
+    lines = [f"📈 <b>{data['wins']} из {data['settled']} за неделю</b>"]
+    if data["market_count"]:
+        coverage = (
+            ""
+            if data["market_count"] == data["settled"]
+            else f" из {data['market_count']} карт с кэфами"
+        )
+        lines[0] += f", рынок ждал {data['market_expected']:.1f}{coverage}"
+    lines.append("")
+    buckets = []
+    for level, label in ((0, "☆"), (1, "★"), (2, "★★"), (3, "★★★ и выше")):
+        rows = [
+            e
+            for e in data["entries"]
+            if e["correct"] is not None
+            and (e["strength"] >= 3 if level == 3 else e["strength"] == level)
+        ]
+        if not rows:
+            continue
+        text = f"{label} {sum(e['correct'] for e in rows)} из {len(rows)}"
+        priced = [e for e in rows if e["market_probability"] is not None]
+        if level == 3 and priced:
+            coverage = "" if len(priced) == len(rows) else f" из {len(priced)} с кэфами"
+            text += f" (рынок ждал {sum(e['market_probability'] for e in priced):.1f}{coverage})"
+        buckets.append(text)
+    if buckets:
+        lines.append("👉 По звёздам: " + ", ".join(buckets))
+    miss = max(
+        (e for e in data["entries"] if e["correct"] is False),
+        key=lambda e: e["probability"],
+        default=None,
+    )
+    if miss:
+        p = miss["prediction"]
+        opponent = p.draft.dire_name if p.favorite == "radiant" else p.draft.radiant_name
+        lines.append(
+            f"👉 Промах недели: {esc(p.favorite_name, 40)} {p.favorite_probability:.0%} {stars(p.favorite_probability)} против {esc(opponent, 40)}, карта {p.draft.map_number or '?'} ({p.draft.observed_at.astimezone(MOSCOW):%d.%m})"
+        )
+    if data["comeback"]:
+        c = data["comeback"]
+        opponent = f" против {esc(c['opponent'], 40)}" if c.get("opponent") else ""
+        date = f" ({c['date']})" if c.get("date") else ""
+        lines.append(
+            f"👉 Камбэк недели: {esc(c['team'], 40)}{opponent}, карта {c.get('map_number') or '?'}{date}, по ходу рынок давал им {c['probability']:.0%}"
+        )
+    cumulative = data["cumulative"]
+    lines.append(
+        f"ℹ️ По одним героям {data['draft_wins']} из {data['draft_count']}. С запуска {cumulative['wins']} из {cumulative['settled']}"
+    )
+    if data.get("late_analysis"):
+        lines.append("⏱ Разборы с задержкой · отдельный учёт")
+    if data.get("additional"):
+        extra = data["additional"]
+        lines.append(f"⏱ С задержкой отдельно: {extra['wins']} из {extra['settled']}")
+    if data.get("demo"):
+        lines.insert(0, "<b>ДЕМОНСТРАЦИЯ · все данные условные</b>")
+    return "\n".join(lines)
+
+
 def daily_report_hour(value):
     """Legacy evening settings now mean one final report after midnight."""
     return 0 if int(value) >= 12 else int(value)
@@ -286,10 +356,15 @@ def render_report(data):
         "декабря",
     )
     weekdays = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
+    weekly = "недели" in data["label"].lower() and bool(timestamp(data.get("until")))
+    end = timestamp(data["until"]).astimezone(MOSCOW) - timedelta(seconds=1) if weekly else None
+    calendar_week = (
+        weekly and moment.weekday() == 0 and end.date() == moment.date() + timedelta(days=6)
+    )
     c.header(
         data["label"].lower() + " · Dota 2",
-        f"{moment.day} {months[moment.month - 1]}",
-        weekdays[moment.weekday()],
+        f"{moment:%d.%m} — {end:%d.%m}" if weekly else f"{moment.day} {months[moment.month - 1]}",
+        ("пн — вс" if calendar_week else "7 дней") if weekly else weekdays[moment.weekday()],
     )
     c.panel((56, 148, 1224, 282), CYAN)
     c.text(80, 171, "ИГРОКИ + ДРАФТ", 17, bold=True, middle=True)

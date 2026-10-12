@@ -329,6 +329,64 @@ async def test_uncertain_report_image_is_not_retried(service):
     service.bot.send_photo.assert_awaited_once()
 
 
+async def test_weekly_report_is_monday_noon_and_not_duplicated_on_tuesday(
+    service, prediction, monkeypatch
+):
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 10, 18, 20, tzinfo=UTC)
+    for module in ("service", "storage", "reports"):
+        monkeypatch.setattr(f"betbot.{module}.utcnow", lambda: now)
+    service.store.set("auto_publish", True)
+    p = replace(prediction, draft=replace(prediction.draft, observed_at=now, source_updated_at=now))
+    service.store.observe(p.draft, "observed")
+    identity = service.store.add_forecast(p)
+    delivery = service.store.begin_delivery(identity, "forecast", -100)
+    service.store.finish_delivery(delivery, "sent", 50)
+    service.store.result(p.draft.match_id, {"radiant_win": True})
+    service.bot = SimpleNamespace(send_photo=AsyncMock(return_value=SimpleNamespace(message_id=60)))
+    now = datetime(2026, 10, 19, 8, tzinfo=UTC)
+    await service.reports()
+    assert not any(
+        "за неделю" in c.kwargs["caption"] for c in service.bot.send_photo.call_args_list
+    )
+    now += timedelta(hours=1)
+    await service.reports()
+    await service.reports()
+    now += timedelta(days=1)
+    await service.reports()
+    weekly = [
+        c for c in service.bot.send_photo.call_args_list if "за неделю" in c.kwargs["caption"]
+    ]
+    assert len(weekly) == 1 and "1 из 1" in weekly[0].kwargs["caption"]
+    assert "По звёздам" in weekly[0].kwargs["caption"]
+
+
+async def test_missed_monday_weekly_report_is_delivered_after_restart(
+    service, prediction, monkeypatch
+):
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 10, 18, 20, tzinfo=UTC)
+    for module in ("service", "storage", "reports"):
+        monkeypatch.setattr(f"betbot.{module}.utcnow", lambda: now)
+    service.store.set("auto_publish", True)
+    p = replace(prediction, draft=replace(prediction.draft, observed_at=now, source_updated_at=now))
+    service.store.observe(p.draft, "observed")
+    identity = service.store.add_forecast(p)
+    delivery = service.store.begin_delivery(identity, "forecast", -100)
+    service.store.finish_delivery(delivery, "sent", 50)
+    service.bot = SimpleNamespace(send_photo=AsyncMock(return_value=SimpleNamespace(message_id=60)))
+    now = datetime(2026, 10, 20, 9, tzinfo=UTC)
+    await service.reports()
+    assert not service.bot.send_photo.await_count  # Outcome is still pending.
+    service.store.result(p.draft.match_id, {"radiant_win": True})
+    await service.reports()
+    assert (
+        sum("за неделю" in c.kwargs["caption"] for c in service.bot.send_photo.call_args_list) == 1
+    )
+
+
 async def test_tournament_cache_preserves_recent_games_if_live_source_fails(service):
     service.store.set("league_activity", {"123": {"last_match_at": utcnow().isoformat()}})
     service.odota.live = AsyncMock(side_effect=TimeoutError())

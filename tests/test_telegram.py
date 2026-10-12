@@ -242,6 +242,18 @@ async def press(bot, dispatcher, data):
     await dispatcher.feed_update(bot, Update(update_id=2, callback_query=callback))
 
 
+async def test_price_alert_panel_can_toggle_and_set_threshold(routed_bot):
+    bot, dispatcher, service, session = routed_bot
+    await press(bot, dispatcher, "ui:odds-alerts")
+    assert "Движение кэфов" in session.requests[-1].text
+    assert service.odds_alerts_enabled
+    await press(bot, dispatcher, "ui:odds-alerts:toggle")
+    assert not service.odds_alerts_enabled
+    await press(bot, dispatcher, "ui:odds-alerts:threshold:10")
+    assert service.odds_alert_relative_increase == 0.10
+    assert "10%" in session.requests[-1].text
+
+
 async def test_new_tournament_can_be_skipped_and_enabled_later_from_catalog(routed_bot):
     bot, dispatcher, service, session = routed_bot
     day = utcnow().astimezone(MOSCOW).date().isoformat()

@@ -138,6 +138,16 @@ class Service:
     def allow_delayed_analysis(self):
         return self.store.get("allow_delayed_analysis", self.settings.allow_delayed_analysis)
 
+    @property
+    def odds_alerts_enabled(self):
+        return self.store.get("odds_alerts_enabled", self.settings.odds_alerts_enabled)
+
+    @property
+    def odds_alert_relative_increase(self):
+        return self.store.get(
+            "odds_alert_relative_increase", self.settings.odds_alert_relative_increase
+        )
+
     def publication_issue(self, draft, late=False):
         if late and self.allow_delayed_analysis:
             return eligible_analysis(draft, self.settings.max_draft_age_seconds)
@@ -952,9 +962,103 @@ class Service:
                 self.store.save_quotes(p.draft.match_id, quotes)
                 if not p.quotes and quotes:
                     await self.attach_missing_quotes(row["id"], p, quotes)
+                await self.notify_price_increase(row["id"], p, quotes)
                 tracked += 1
                 if tracked >= 8:
                     break
+
+    async def notify_price_increase(self, forecast_id, p, quotes):
+        from .domain import Quote
+        from .price_alerts import alert_text, comparable_quote, favorite_quote, identity, increased
+
+        now = utcnow()
+        if not self.bot or self.paused or not self.automatic or not self.odds_alerts_enabled:
+            return
+        if (
+            not self.store.enabled(p.draft.league_id)
+            or not self.store.get("source:Polymarket", True)
+            or (now - p.draft.observed_at).total_seconds() < 180
+        ):
+            return
+        if self.store.match(p.draft.match_id)["result"]:
+            return
+        current = favorite_quote(p, quotes, self.settings.quote_max_age_seconds, now)
+        if not current:
+            return
+        for target in self.store.publications(forecast_id):
+            if (
+                self.paused
+                or not self.automatic
+                or not self.odds_alerts_enabled
+                or not self.store.get("source:Polymarket", True)
+                or not self.store.enabled(p.draft.league_id)
+                or target["result"]
+            ):
+                return
+            if not self.destination_enabled(target["destination"]):
+                continue
+            key = f"odds_alert:{forecast_id}:{target['destination']}"
+            state = self.store.get(key)
+            if not state or state["market_key"] != identity(current):
+                attached = [
+                    Quote.from_dict(q)
+                    for q in self.store.get(
+                        f"quote_attached:{forecast_id}:{target['destination']}", []
+                    )
+                ]
+                baseline = comparable_quote(p, p.quotes or attached, current) or current
+                state = {
+                    "market_key": identity(current),
+                    "reference": baseline.odds,
+                    "count": state["count"] if state else 0,
+                    "last_at": state["last_at"] if state else None,
+                }
+                self.store.set(key, state)
+            previous_at = timestamp(state["last_at"])
+            if state["count"] >= self.settings.odds_alert_max_per_map or (
+                previous_at
+                and (now - previous_at).total_seconds() < self.settings.odds_alert_cooldown_seconds
+            ):
+                continue
+            if not increased(
+                state["reference"],
+                current.odds,
+                self.odds_alert_relative_increase,
+                self.settings.odds_alert_min_increase,
+            ):
+                continue
+            kind = f"odds_alert:{state['count'] + 1}"
+            delivery = self.store.begin_delivery(
+                forecast_id, kind, target["destination"], target["destination_topic_id"]
+            )
+            if not delivery:
+                continue
+            # Save before sending: a lost reply or crash must not cause a duplicate.
+            next_state = {
+                **state,
+                "reference": current.odds,
+                "count": state["count"] + 1,
+                "last_at": now.isoformat(),
+            }
+            self.store.set(key, next_state)
+            try:
+                msg = await self.bot.send_message(
+                    target["destination"],
+                    alert_text(p, state["reference"], current),
+                    reply_parameters=ReplyParameters(message_id=target["post_id"]),
+                    message_thread_id=target["destination_topic_id"],
+                )
+                self.store.finish_delivery(delivery, "sent", msg.message_id)
+                self.store.health("Движение кэфов", True, "Уведомление доставлено")
+            except (TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter) as exc:
+                self.store.finish_delivery(delivery, "failed", error=type(exc).__name__)
+                self.store.set(key, {**state, "last_at": now.isoformat()})
+                self.store.health("Движение кэфов", False, type(exc).__name__)
+            except Exception as exc:
+                self.store.finish_delivery(delivery, "uncertain", error=type(exc).__name__)
+                self.store.health(
+                    "Движение кэфов", False, "Исход отправки неизвестен; повтор не отправляется"
+                )
 
     async def attach_missing_quotes(self, forecast_id, p, quotes):
         if not self.bot or self.paused:
@@ -1042,7 +1146,13 @@ class Service:
 
     async def reports_for(self, target):
         now = utcnow().astimezone(MOSCOW)
-        from .reports import daily_report_hour, public_report_payload, render_report, report_caption
+        from .reports import (
+            daily_report_hour,
+            public_report_payload,
+            render_report,
+            report_caption,
+            weekly_caption,
+        )
 
         hour = daily_report_hour(self.store.get("daily_report_hour", 0))
         days = list(range(1, 8)) if now.hour >= hour else list(range(2, 8))
@@ -1074,9 +1184,17 @@ class Service:
             ):
                 continue
             await self.send_report(period, report_caption(summary), render_report(summary), target)
-        if now.weekday() == 0 and now.hour >= self.store.get("weekly_report_hour", 12):
-            end = datetime.combine(now.date(), time.min, MOSCOW).astimezone(utcnow().tzinfo)
+        monday = now.date() - timedelta(days=now.weekday())
+        due = datetime.combine(monday, time(self.store.get("weekly_report_hour", 12)), MOSCOW)
+        if now >= due:
+            end = datetime.combine(monday, time.min, MOSCOW).astimezone(utcnow().tzinfo)
             start = end - timedelta(days=7)
+            week_key = f"week:{start.date()}:final"
+            if any(
+                self.store.report_state(key, target["chat_id"]) in ("sent", "sending", "uncertain")
+                for key in (week_key, week_key + ":delayed")
+            ):
+                return
             summary = public_report_payload(
                 self.store,
                 start.isoformat(),
@@ -1103,7 +1221,7 @@ class Service:
                     return
                 await self.send_report(
                     period,
-                    report_caption(summary),
+                    weekly_caption(summary),
                     render_report(summary),
                     target,
                 )

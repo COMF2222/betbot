@@ -312,6 +312,7 @@ def publications(service, notice=""):
             ],
             [button("🎯 Порог сигнала", "ui:threshold"), button("⏱ Тоталы времени", "ui:duration")],
             [button("📅 Время отчётов", "ui:report-hours")],
+            [button("📈 Движение кэфов", "ui:odds-alerts")],
             [
                 button(
                     "Утренний анонс ✓"
@@ -324,6 +325,31 @@ def publications(service, notice=""):
             ],
         ],
         "ui:home",
+    )
+
+
+def odds_alerts(service):
+    active, threshold = service.odds_alerts_enabled, service.odds_alert_relative_increase
+    text = f"📈 <b>Движение кэфов</b>\n\n{'🟢 Включено' if active else '⚪ Выключено'}\nУведомление ответом на прогноз, когда кэф Polymarket на фаворита вырос от <b>{threshold:.0%}</b> и минимум на <b>{service.settings.odds_alert_min_increase:.2f}</b>.\n\nПауза между сообщениями: {service.settings.odds_alert_cooldown_seconds // 60} мин. Максимум {service.settings.odds_alert_max_per_map} на карту. Каждый следующий рост сравниваем с последним уведомлением."
+    return panel(
+        text,
+        [
+            [
+                button(
+                    "Выключить" if active else "Включить",
+                    "ui:odds-alerts:toggle",
+                    "danger" if active else "success",
+                )
+            ],
+            [
+                button(
+                    f"{'✓ ' if abs(threshold - value / 100) < 1e-8 else ''}{value}%",
+                    f"ui:odds-alerts:threshold:{value}",
+                )
+                for value in (10, 20, 30)
+            ],
+        ],
+        "ui:settings",
     )
 
 
