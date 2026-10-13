@@ -17,6 +17,7 @@ def test_export_keeps_live_wal_data_and_excludes_vpn_and_runtime_secrets(tmp_pat
     for name in (
         "Dockerfile",
         "compose.yaml",
+        "compose.direct.yaml",
         "compose.mihomo.yaml",
         ".dockerignore",
         ".env.example",

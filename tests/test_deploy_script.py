@@ -21,7 +21,7 @@ COMPOSE = [
     "-f",
     "compose.mihomo.yaml",
 ]
-DOCKER_STUB = r'''#!/usr/bin/env python3
+DOCKER_STUB = r"""#!/usr/bin/env python3
 import json
 import os
 import sys
@@ -37,19 +37,62 @@ elif args[0] == "inspect":
     print("true" if args[2] == "{{.State.Running}}" else "bridge")
 elif args[0] == "exec":
     print("7890" if "sed -n" in args[4] else "mixed-port: 7890")
-elif args[:9] == ["compose", "--project-name", "betbot", "--env-file", "deploy.env",
-                  "-f", "compose.yaml", "-f", "compose.mihomo.yaml"]:
+elif args[:8] == ["compose", "--project-name", "betbot", "--env-file", "deploy.env",
+                  "-f", "compose.yaml", "-f"] and args[8] in {"compose.mihomo.yaml", "compose.direct.yaml"}:
     if len(args) < 10 or args[9] not in {"config", "build", "run", "up", "stop", "logs", "ps"}:
         sys.exit("Invalid Compose subcommand: " + repr(args))
     if args[9] == "run" and "-T" in args:
         sys.stdin.read()
 else:
     sys.exit("Unexpected Docker command: " + repr(args))
-'''
+"""
 
 
 @unittest.skipUnless(sys.platform.startswith("linux") and shutil.which("bash"), "Linux Bash")
 class DeployScriptTest(unittest.TestCase):
+    def test_direct_mode_persists_without_inspecting_vpn(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stage = Path(directory)
+            shutil.copyfile(ROOT / "deploy.sh", stage / "deploy.sh")
+            (stage / ".env").write_text("")
+            (stage / "data").mkdir()
+            (stage / "data/model.json").write_text("{}")
+            stub = stage / "docker"
+            stub.write_text(DOCKER_STUB, encoding="utf-8")
+            stub.chmod(0o755)
+            log = stage / "commands.jsonl"
+            env = {
+                **os.environ,
+                "PATH": str(stage) + os.pathsep + os.environ["PATH"],
+                "DEPLOY_TEST_LOG": str(log),
+            }
+            for action in (
+                "setup-direct",
+                "start",
+                "check",
+                "restart",
+                "inspect",
+                "status",
+                "stop",
+            ):
+                result = subprocess.run(
+                    ["bash", str(stage / "deploy.sh"), action],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual((stage / "deploy.env").read_text(), "DEPLOY_MODE=direct\n")
+            calls = [json.loads(line) for line in log.read_text().splitlines()]
+            self.assertFalse(any(call[0] in {"inspect", "exec", "ps"} for call in calls))
+            compose_calls = [call for call in calls if call[:2] == ["compose", "--project-name"]]
+            self.assertTrue(all(call[8] == "compose.direct.yaml" for call in compose_calls))
+            self.assertEqual(
+                [call[9] for call in compose_calls],
+                ["config", "build", "run", "run", "up", "ps", "run", "up", "ps", "stop"],
+            )
+
     def test_all_commands_pass_separate_arguments_to_compose(self):
         commands = {
             "setup": ["config", "build", "run", "run"],

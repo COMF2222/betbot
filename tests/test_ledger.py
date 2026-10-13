@@ -3,6 +3,27 @@ import json
 from betbot.storage import Store
 
 
+def test_archived_publication_counts_without_replying_or_republishing(tmp_path, prediction):
+    store = Store(tmp_path / "ledger.sqlite3")
+    store.observe(prediction.draft, "observed")
+    identity = store.add_forecast(prediction)
+    delivery = store.begin_delivery(identity, "forecast", -100)
+    store.finish_delivery(delivery, "sent", 42)
+    with store.db:
+        store.db.execute(
+            "UPDATE deliveries SET state='archived',message_id=NULL WHERE id=?", (delivery,)
+        )
+        store.db.execute("UPDATE forecasts SET message_id=NULL WHERE id=?", (identity,))
+    rows = store.published_between("2000", "2099", destination=-100)
+    assert len(rows) == 1 and rows[0]["id"] == identity
+    assert not store.published_between("2000", "2099", destination=-200)
+    assert not store.publications()
+    assert not store.pending_publications()
+    assert store.begin_delivery(identity, "forecast", -100) is None
+    assert store.forecast(identity)["state"] == "published"
+    store.close()
+
+
 def test_duplicate_prediction_and_result_are_immutable(tmp_path, prediction):
     store = Store(tmp_path / "ledger.sqlite3")
     store.observe(prediction.draft, "observed")

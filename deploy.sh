@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Existing Mihomo only. Never starts, stops or rewrites its container/configuration.
+# Direct access or an existing Mihomo. Never changes the VPN container/configuration.
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 umask 077
@@ -15,6 +15,10 @@ if [[ ! -f .env || ! -f data/model.json ]]; then
 fi
 
 action=${1:-setup}
+if [[ "$action" == setup-direct ]]; then
+  printf 'DEPLOY_MODE=direct\n' > deploy.env
+  echo 'Прямое подключение без VPN.'
+fi
 if [[ "$action" == setup ]]; then
   mihomo_name=${2:-}
   if [[ -z "$mihomo_name" ]]; then
@@ -60,9 +64,16 @@ if [[ ! -f deploy.env ]]; then
   echo 'Сначала выполните: bash deploy.sh setup' >&2
   exit 1
 fi
-dc=(docker compose --project-name betbot --env-file deploy.env -f compose.yaml -f compose.mihomo.yaml)
+deploy_mode=$(sed -n 's/^DEPLOY_MODE=//p' deploy.env)
+deploy_mode=${deploy_mode:-mihomo}
+case "$deploy_mode" in
+  direct) override=compose.direct.yaml ;;
+  mihomo) override=compose.mihomo.yaml ;;
+  *) echo 'DEPLOY_MODE должен быть direct или mihomo.' >&2; exit 1 ;;
+esac
+dc=(docker compose --project-name betbot --env-file deploy.env -f compose.yaml -f "$override")
 case "$action" in
-  setup)
+  setup|setup-direct)
     "${dc[@]}" config --quiet
     "${dc[@]}" build betbot
     # One-off permission repair, scoped strictly to the mounted bot data directory.
@@ -72,6 +83,7 @@ case "$action" in
     ;;
   check) "${dc[@]}" run --rm --no-deps betbot preflight ;;
   inspect)
+    if [[ "$deploy_mode" == direct ]]; then echo 'Прямое подключение без VPN.'; exit 0; fi
     mihomo_name=${2:-$(sed -n 's/^MIHOMO_CONTAINER=//p' deploy.env)}
     if [[ ! "$mihomo_name" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]]; then
       echo 'Укажите имя: bash deploy.sh inspect ИМЯ_MIHOMO [ПУТЬ_К_CONFIG]' >&2
@@ -84,5 +96,5 @@ case "$action" in
   restart) "${dc[@]}" up -d --no-deps --force-recreate betbot ;;
   logs) "${dc[@]}" logs --tail=80 -f betbot ;;
   status) "${dc[@]}" ps ;;
-  *) echo 'Команды: setup [МИХОМО] [ПОРТ], inspect [МИХОМО] [КОНФИГ], check, start, stop, restart, logs, status' >&2; exit 1 ;;
+  *) echo 'Команды: setup-direct, setup [МИХОМО] [ПОРТ], inspect [МИХОМО] [КОНФИГ], check, start, stop, restart, logs, status' >&2; exit 1 ;;
 esac

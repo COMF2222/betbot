@@ -45,6 +45,7 @@ def package(output, include_env=False):
         for name in (
             "Dockerfile",
             "compose.yaml",
+            "compose.direct.yaml",
             "compose.mihomo.yaml",
             ".dockerignore",
             ".env.example",

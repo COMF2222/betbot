@@ -1,0 +1,6 @@
+services:
+  betbot:
+    environment:
+      PROXY_URL: ""
+      TELEGRAM_PROXY_URL: ""
+      PROXY_REQUIRED: "false"

@@ -347,7 +347,7 @@ class Store:
         query = "SELECT f.*,m.result FROM forecasts f JOIN matches m ON m.id=f.match_id WHERE f.state='published' AND f.created_at>=? AND f.created_at<?"
         args = [since, until]
         if destination is not None:
-            query += " AND EXISTS(SELECT 1 FROM deliveries d WHERE d.forecast_id=f.id AND d.kind='forecast' AND d.state='sent' AND d.destination=?)"
+            query += " AND EXISTS(SELECT 1 FROM deliveries d WHERE d.forecast_id=f.id AND d.kind='forecast' AND d.state IN ('sent','archived') AND d.destination=?)"
             args.append(destination)
         query += " ORDER BY f.created_at,f.id"
         return [dict(row) for row in self.db.execute(query, args)]
@@ -405,7 +405,7 @@ class Store:
                 "SELECT * FROM deliveries WHERE forecast_id=? AND kind=? AND destination=? ORDER BY id DESC LIMIT 1",
                 (forecast_id, kind, destination),
             ).fetchone()
-            if existing and existing["state"] in ("sending", "sent", "uncertain"):
+            if existing and existing["state"] in ("sending", "sent", "uncertain", "archived"):
                 return None
             if kind == "forecast":
                 row = self.forecast(forecast_id)

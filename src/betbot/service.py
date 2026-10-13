@@ -1179,7 +1179,7 @@ class Service:
             if any(
                 key != period
                 and self.store.report_state(key, target["chat_id"])
-                in ("sent", "sending", "uncertain")
+                in ("sent", "sending", "uncertain", "archived")
                 for key in previous
             ):
                 continue
@@ -1191,7 +1191,8 @@ class Service:
             start = end - timedelta(days=7)
             week_key = f"week:{start.date()}:final"
             if any(
-                self.store.report_state(key, target["chat_id"]) in ("sent", "sending", "uncertain")
+                self.store.report_state(key, target["chat_id"])
+                in ("sent", "sending", "uncertain", "archived")
                 for key in (week_key, week_key + ":delayed")
             ):
                 return
@@ -1217,6 +1218,7 @@ class Service:
                     "sent",
                     "sending",
                     "uncertain",
+                    "archived",
                 ):
                     return
                 await self.send_report(
