@@ -179,7 +179,7 @@ async def test_morning_brief_runs_at_ten_moscow_and_is_deduplicated(service, mon
     service.store.set("auto_publish", True)
     service.store.set("poly_league:123", "BLAST Slam")
     service.bot = SimpleNamespace(
-        send_photo=AsyncMock(return_value=SimpleNamespace(message_id=200)), send_message=AsyncMock()
+        send_message=AsyncMock(return_value=SimpleNamespace(message_id=200))
     )
     service.poly.discover = AsyncMock(
         return_value=[
@@ -197,11 +197,11 @@ async def test_morning_brief_runs_at_ten_moscow_and_is_deduplicated(service, mon
     monkeypatch.setattr("betbot.service.utcnow", lambda: datetime(2026, 10, 11, 10, tzinfo=MOSCOW))
     await service.morning_brief()
     await service.morning_brief()
-    assert service.bot.send_photo.await_count == 1
-    assert "12:00 МСК" in service.bot.send_photo.call_args.kwargs["caption"]
+    assert service.bot.send_message.await_count == 1
+    assert "12:00 МСК" in service.bot.send_message.call_args.args[1]
     monkeypatch.setattr("betbot.service.utcnow", lambda: datetime(2026, 10, 11, 17, tzinfo=MOSCOW))
     await service.morning_brief()
-    assert service.bot.send_photo.await_count == 1
+    assert service.bot.send_message.await_count == 1
 
 
 async def test_uncertain_remote_send_is_not_retried(service, draft):

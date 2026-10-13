@@ -236,37 +236,12 @@ class Service:
             self.store.set("tournament_catalog_updated_at", utcnow().isoformat())
         except Exception as exc:
             self.store.health("Новые турниры · Liquipedia", False, type(exc).__name__)
-        try:
-            self.store.set("publication_catalog_checked_at", utcnow().isoformat())
-            selected = await self.liquipedia.selected_details(
-                self.store.leagues(enabled_only=True), now
-            )
-            try:
-                watched = [event for event in self.store.tournaments() if event.get("enabled")]
-                await self.liquipedia.cache_team_logos(
-                    [*selected["events"], *watched], self.settings.data_dir / "team-logos"
-                )
-            except Exception as exc:
-                self.store.health("Логотипы команд", False, type(exc).__name__)
-            self.store.set("publication_catalog", selected)
-            self.store.health(
-                "Расписание · Liquipedia",
-                True,
-                f"Проверены выбранные турниры: {len(selected['events'])}",
-            )
-        except Exception as exc:
-            self.store.health("Расписание · Liquipedia", False, type(exc).__name__)
 
     def start_tournament_refresh(self, force=False):
         if self.tournament_task and not self.tournament_task.done():
             return self.tournament_task
         checked = timestamp(self.store.get("tournament_catalog_checked_at"))
-        if (
-            not force
-            and checked
-            and self.store.get("publication_catalog_checked_at")
-            and 0 <= (utcnow() - checked).total_seconds() < 1800
-        ):
+        if not force and checked and 0 <= (utcnow() - checked).total_seconds() < 1800:
             return None
         self.tournament_task = asyncio.create_task(self.refresh_tournaments())
         return self.tournament_task
@@ -1121,8 +1096,7 @@ class Service:
                 await self.reports_for(target)
 
     async def morning_brief(self):
-        from .announcement_graphics import render_schedule
-        from .brief import brief_caption, combined_schedule, scheduled_series
+        from .brief import brief_caption, scheduled_series
         from .reports import report_payload
 
         now = utcnow().astimezone(MOSCOW)
@@ -1151,29 +1125,11 @@ class Service:
             }
             for row in self.store.leagues(enabled_only=True)
         ]
+        rules = [rule for rule in rules if rule["keywords"]]
         if not rules:
             return
         try:
-            try:
-                market = scheduled_series(await self.poly.discover(), rules, now)
-            except Exception:
-                market = []
-            catalog = self.store.get("publication_catalog", {})
-            checked = timestamp(catalog.get("checked_at"))
-            wiki = (
-                catalog.get("matches", [])
-                if checked and 0 <= (now - checked).total_seconds() <= 3600
-                else []
-            )
-            drafts = self.live_cache[1] if self.live_cache else []
-            series = combined_schedule(
-                wiki,
-                market,
-                {rule["league_id"] for rule in rules},
-                now,
-                drafts,
-                self.store.get("team_aliases", {}),
-            )
+            series = scheduled_series(await self.poly.discover(), rules, now)
             if not series:
                 return
             midnight = datetime.combine(now.date(), time.min, MOSCOW)
@@ -1184,80 +1140,9 @@ class Service:
                 previous["late"] = report_payload(
                     self.store, since, until, destination=target["chat_id"], late_analysis=True
                 )
-                await self.send_report(
-                    period,
-                    brief_caption(series, previous),
-                    render_schedule(series, now, self.settings.data_dir / "team-logos"),
-                    target=target,
-                )
+                await self.send_report(period, brief_caption(series, previous), target=target)
         except Exception as exc:
             self.store.health("Утренний анонс", False, type(exc).__name__)
-
-    async def tournament_announcements(self):
-        from .announcement_graphics import render_tournament
-        from .announcements import tournament_caption
-
-        if (
-            not self.bot
-            or not self.automatic
-            or self.paused
-            or not self.store.get("tournament_announcements_enabled", True)
-        ):
-            return
-        now = utcnow()
-        today = now.astimezone(MOSCOW).date().isoformat()
-        enabled = {row["id"] for row in self.store.leagues(enabled_only=True)}
-        catalog = self.store.get("publication_catalog", {})
-        candidates = {}
-        for event in [*catalog.get("events", []), *self.store.tournaments()]:
-            verified = timestamp(event.get("verified_at"))
-            selected = event.get("league_id") in enabled or bool(event.get("enabled"))
-            if (
-                not selected
-                or not verified
-                or not 0 <= (now - verified).total_seconds() <= 3600
-                or event.get("end_date", "") < today
-            ):
-                continue
-            candidates[event["source_key"]] = event
-        for event in sorted(
-            candidates.values(), key=lambda item: (item["start_date"], item["name"])
-        ):
-            period = "tournament:" + event["source_key"] + ":announcement"
-            targets = [
-                target
-                for target in self.destinations
-                if self.store.report_state(period, target["chat_id"]) in (None, "failed")
-            ]
-            # Several qualifier regions can share a single Steam ticket. Keep the
-            # first batch of enabled tournaments from flooding a destination.
-            identity = event.get("league_id") or event["source_key"]
-            targets = [
-                target
-                for target in targets
-                if not (
-                    last := timestamp(
-                        self.store.get(f"tournament_announcement_at:{identity}:{target['chat_id']}")
-                    )
-                )
-                or (now - last).total_seconds() >= 86400
-            ]
-            if not targets:
-                continue
-            image = render_tournament(event, self.settings.data_dir / "team-logos")
-            for target in targets:
-                await self.send_report(period, tournament_caption(event), image, target=target)
-                if self.store.report_state(period, target["chat_id"]) in (
-                    "sent",
-                    "sending",
-                    "uncertain",
-                ):
-                    self.store.set(
-                        f"tournament_announcement_at:{identity}:{target['chat_id']}",
-                        now.isoformat(),
-                    )
-            # One tournament per cycle prevents a burst after enabling several tickets.
-            break
 
     async def reports_for(self, target):
         now = utcnow().astimezone(MOSCOW)
@@ -1426,7 +1311,6 @@ class Service:
                         await self.publish(identity)
             await self.track_market_prices()
             await self.morning_brief()
-            await self.tournament_announcements()
             await self.reports()
             repeat = self.store.get("tournament_alert_repeat_requested", False)
             if repeat:

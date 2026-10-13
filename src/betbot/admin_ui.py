@@ -323,14 +323,6 @@ def publications(service, notice=""):
                     "ui:toggle:morning",
                 )
             ],
-            [
-                button(
-                    "Анонсы турниров ✓"
-                    if service.store.get("tournament_announcements_enabled", True)
-                    else "Анонсы турниров: выкл.",
-                    "ui:toggle:tournament-announcements",
-                )
-            ],
         ],
         "ui:home",
     )
