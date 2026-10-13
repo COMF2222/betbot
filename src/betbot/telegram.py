@@ -843,6 +843,7 @@ def build_router(service: Service) -> Router:
                 "all-maps": "publish_all_maps",
                 "delayed": "allow_delayed_analysis",
                 "morning": "morning_brief_enabled",
+                "tournament-announcements": "tournament_announcements_enabled",
             }.get(kind)
             if not key:
                 return
@@ -852,6 +853,9 @@ def build_router(service: Service) -> Router:
                 "delayed": service.allow_delayed_analysis,
                 "morning": service.store.get(
                     "morning_brief_enabled", service.settings.morning_brief_enabled
+                ),
+                "tournament-announcements": service.store.get(
+                    "tournament_announcements_enabled", True
                 ),
             }.get(kind, service.store.get(key, False))
             notice = ""

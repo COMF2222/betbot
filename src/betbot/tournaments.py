@@ -5,9 +5,12 @@ import re
 import time
 from datetime import date, timedelta
 from html.parser import HTMLParser
-from urllib.parse import unquote
+from io import BytesIO
+from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 import httpx
+from PIL import Image
 
 from .domain import timestamp, utcnow
 from .presentation import MOSCOW
@@ -170,6 +173,8 @@ class Liquipedia:
             return raw
 
     async def tournaments(self, now=None):
+        from .announcements import page_details
+
         now = now or utcnow()
         candidates = {}
         for tier in (1, 2):
@@ -221,6 +226,7 @@ class Liquipedia:
                     continue
                 events.append(
                     {
+                        **(page_details(content, page, now) or {}),
                         **candidate,
                         "tier": tier,
                         "start_date": start.isoformat(),
@@ -229,6 +235,155 @@ class Liquipedia:
                     }
                 )
         return events
+
+    async def selected_details(self, leagues, now=None):
+        """Search ticket IDs, then verify the ID and dates in each page's infobox.
+
+        A Steam ticket can cover several qualifier regions or seasonal stages.
+        Dates reject old seasons; names or search snippets never establish identity.
+        """
+        from .announcements import page_details, page_matches
+
+        now = now or utcnow()
+        ids = {int(row["id"]) for row in leagues}
+        pages = set()
+        for identity in sorted(ids):
+            raw = await self.query(
+                action="query",
+                list="search",
+                srsearch=f'insource:"leagueid={identity}"',
+                srwhat="text",
+                srlimit=50,
+                formatversion=2,
+            )
+            pages.update(
+                row["title"] for row in raw.get("query", {}).get("search", []) if row.get("title")
+            )
+        details, matches = [], []
+        titles = sorted(pages)
+        for offset in range(0, len(titles), 50):
+            raw = await self.query(
+                action="query",
+                prop="revisions",
+                rvprop="content",
+                rvslots="main",
+                titles="|".join(titles[offset : offset + 50]),
+                redirects=1,
+                formatversion=2,
+            )
+            for page in raw.get("query", {}).get("pages", []):
+                try:
+                    content = page["revisions"][0]["slots"]["main"]["content"]
+                    event = page_details(content, page["title"], now)
+                except (KeyError, IndexError, TypeError, ValueError):
+                    continue
+                today = now.astimezone(MOSCOW).date()
+                if (
+                    not event
+                    or event["league_id"] not in ids
+                    or event["end_date"] < today.isoformat()
+                    or event["start_date"] > (today + timedelta(days=180)).isoformat()
+                ):
+                    continue
+                details.append(event)
+                matches.extend(page_matches(content, event))
+        return {
+            "events": details,
+            "matches": matches,
+            "checked_at": now.isoformat(),
+            "league_ids": sorted(ids),
+        }
+
+    async def cache_team_logos(self, events, directory):
+        """Cache images named by each team's own infobox; never infer logo URLs."""
+        from .announcements import logo_name, parameters, templates
+
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        names = sorted(
+            {
+                team
+                for event in events
+                for team in event.get("participants", [])
+                if not (directory / logo_name(team)).exists()
+            }
+        )
+        images = {}
+        for offset in range(0, len(names), 50):
+            raw = await self.query(
+                action="query",
+                prop="revisions",
+                rvprop="content",
+                rvslots="main",
+                titles="|".join(names[offset : offset + 50]),
+                redirects=1,
+                formatversion=2,
+            )
+            aliases = {r["to"]: r["from"] for r in raw.get("query", {}).get("redirects", [])}
+            aliases.update({r["to"]: r["from"] for r in raw.get("query", {}).get("normalized", [])})
+            for page in raw.get("query", {}).get("pages", []):
+                try:
+                    content = page["revisions"][0]["slots"]["main"]["content"]
+                except (KeyError, IndexError, TypeError):
+                    continue
+                team = aliases.get(page["title"], page["title"])
+                if team not in names:
+                    continue
+                info = next(
+                    (
+                        args
+                        for block in templates(content)
+                        for kind, args in [parameters(block)]
+                        if kind.startswith("infobox") and ("team" in kind or "organization" in kind)
+                    ),
+                    {},
+                )
+                file = info.get("imagedark") or info.get("image") or info.get("logo")
+                if file and "{{" not in file and "|" not in file:
+                    images[team] = file
+        files = sorted(set(images.values()))
+        urls = {}
+        for offset in range(0, len(files), 50):
+            raw = await self.query(
+                action="query",
+                prop="imageinfo",
+                iiprop="url",
+                iiurlwidth=160,
+                titles="|".join("File:" + name for name in files[offset : offset + 50]),
+                formatversion=2,
+            )
+            for page in raw.get("query", {}).get("pages", []):
+                info = (page.get("imageinfo") or [{}])[0]
+                url = info.get("thumburl") or info.get("url")
+                if url:
+                    urls[page["title"].removeprefix("File:").replace("_", " ")] = url
+        saved = 0
+        for team, file in images.items():
+            url = urls.get(file.replace("_", " "))
+            parsed = urlsplit(url or "")
+            if parsed.scheme != "https" or not (
+                parsed.hostname == "liquipedia.net"
+                or (parsed.hostname or "").endswith(".liquipedia.net")
+            ):
+                continue
+            try:
+                response = await self.http.client.get(url, headers={"User-Agent": USER_AGENT})
+                response.raise_for_status()
+                if len(response.content) > 2_000_000:
+                    continue
+                with Image.open(BytesIO(response.content)) as image:
+                    if image.width * image.height > 4_000_000:
+                        continue
+                    image = image.convert("RGBA")
+                    image.thumbnail((160, 160))
+                    path = directory / logo_name(team)
+                    temporary = path.with_suffix(".tmp")
+                    image.save(temporary, format="PNG")
+                    temporary.replace(path)
+                saved += 1
+            except (httpx.HTTPError, OSError, ValueError):
+                continue
+        return saved
 
 
 def enrich_markets(tournaments, markets, now=None):

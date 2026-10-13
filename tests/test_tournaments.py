@@ -139,6 +139,10 @@ async def tournament_service(tmp_path, monkeypatch):
     )
     svc.bot = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(message_id=91)))
     svc.liquipedia.tournaments = AsyncMock(return_value=[EVENT])
+    svc.liquipedia.cache_team_logos = AsyncMock(return_value=0)
+    svc.liquipedia.selected_details = AsyncMock(
+        return_value={"events": [], "matches": [], "checked_at": NOW.isoformat(), "league_ids": []}
+    )
     svc.poly.discover = AsyncMock(return_value=[])
     yield svc
     await svc.close()
