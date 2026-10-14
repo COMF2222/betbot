@@ -32,6 +32,10 @@ class Store:
             CREATE INDEX IF NOT EXISTS delivery_destination ON deliveries(forecast_id,kind,destination,state);
             CREATE TABLE IF NOT EXISTS tournaments(id INTEGER PRIMARY KEY AUTOINCREMENT, source_key TEXT NOT NULL UNIQUE, payload TEXT NOT NULL, league_id INTEGER, watch_requested INTEGER NOT NULL DEFAULT 0, discovered_at TEXT NOT NULL, updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS tournament_notices(tournament_id INTEGER NOT NULL REFERENCES tournaments(id), admin_id INTEGER NOT NULL, state TEXT NOT NULL, message_id INTEGER, decision TEXT, updated_at TEXT NOT NULL, PRIMARY KEY(tournament_id,admin_id));
+            CREATE TABLE IF NOT EXISTS paper_sessions(id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id INTEGER NOT NULL CHECK(owner_id>0), initial_cents INTEGER NOT NULL, stake_cents INTEGER NOT NULL, cash_cents INTEGER NOT NULL, started_at TEXT NOT NULL, min_forecast_id INTEGER NOT NULL, active INTEGER NOT NULL DEFAULT 1, notifications INTEGER NOT NULL DEFAULT 1, closed_at TEXT);
+            CREATE UNIQUE INDEX IF NOT EXISTS paper_current_owner ON paper_sessions(owner_id) WHERE closed_at IS NULL;
+            CREATE TABLE IF NOT EXISTS paper_bets(id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL REFERENCES paper_sessions(id), forecast_id INTEGER NOT NULL REFERENCES forecasts(id), match_id TEXT NOT NULL, snapshot TEXT NOT NULL, stake_cents INTEGER NOT NULL, odds TEXT, quote_at TEXT, created_at TEXT NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', payout_cents INTEGER NOT NULL DEFAULT 0, settled_at TEXT, UNIQUE(session_id,forecast_id), UNIQUE(session_id,match_id));
+            CREATE TABLE IF NOT EXISTS paper_notifications(id INTEGER PRIMARY KEY AUTOINCREMENT, bet_id INTEGER NOT NULL REFERENCES paper_bets(id), kind TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'planned', created_at TEXT NOT NULL, message_id INTEGER, error TEXT NOT NULL DEFAULT '', not_before TEXT NOT NULL DEFAULT '', UNIQUE(bet_id,kind));
         """)
         if "topic_id" not in {r[1] for r in self.db.execute("PRAGMA table_info(deliveries)")}:
             with self.db:
@@ -46,6 +50,7 @@ class Store:
             self.db.execute("UPDATE forecasts SET state='uncertain' WHERE state='sending'")
             self.db.execute("UPDATE reports SET state='uncertain' WHERE state='sending'")
             self.db.execute("UPDATE tournament_notices SET state='uncertain' WHERE state='sending'")
+            self.db.execute("UPDATE paper_notifications SET state='uncertain' WHERE state='sending'")
 
     def destination(self, chat_id, title, chat_type, topic_id=None, enabled=True):
         with self.db:

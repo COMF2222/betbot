@@ -117,6 +117,47 @@ async def test_actual_dispatcher_opens_admin_keyboard(routed_bot, text):
     assert "админка" in sent[0].text.casefold()
 
 
+async def test_paper_bank_setup_and_stake_edit_through_real_dispatcher(routed_bot):
+    from betbot.paper_bank import PaperBank
+
+    bot, dispatcher, service, session = routed_bot
+    await dispatcher.feed_update(bot, update("/bank"))
+    assert "Виртуальный банк" in session.requests[-1].text
+    await press(bot, dispatcher, "ui:paper-new")
+    await dispatcher.feed_update(bot, update("10000 100"))
+    bank = PaperBank(service.store)
+    assert bank.summary(1)["initial_cents"] == 1000000
+    assert bank.summary(1)["stake_cents"] == 10000
+    assert service.store.get("ui_input:1") is None
+    await press(bot, dispatcher, "ui:paper-stake")
+    await dispatcher.feed_update(bot, update("250,50"))
+    assert bank.summary(1)["stake_cents"] == 25050
+    await press(bot, dispatcher, "ui:paper-pause")
+    assert not bank.summary(1)["active"]
+    await press(bot, dispatcher, "ui:paper-notify")
+    assert not bank.summary(1)["notifications"]
+    assert all(
+        request.chat_id == 1
+        for request in session.requests
+        if isinstance(request, (SendMessage, EditMessageText))
+    )
+
+
+async def test_paper_bank_invalid_input_does_not_create_account_and_group_cannot_open_it(
+    routed_bot,
+):
+    from betbot.paper_bank import PaperBank
+
+    bot, dispatcher, service, session = routed_bot
+    await press(bot, dispatcher, "ui:paper-new")
+    await dispatcher.feed_update(bot, update("100 101"))
+    assert PaperBank(service.store).summary(1) is None
+    assert service.store.get("ui_input:1")["kind"] == "paper-new"
+    before = len(session.requests)
+    await dispatcher.feed_update(bot, update("/bank", "group", -100))
+    assert len(session.requests) == before
+
+
 @pytest.mark.parametrize("text", ["/leagues", "лиги", "турниры BLAST"])
 async def test_first_use_shows_available_leagues_without_selected_league(routed_bot, text):
     bot, dispatcher, _, session = routed_bot

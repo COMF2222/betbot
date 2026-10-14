@@ -54,6 +54,7 @@ ADMIN_COMMANDS = [
     ("history", "Отчёт Tier 1 и CSV"),
     ("pending", "Предварительные прогнозы"),
     ("stats", "Итоги за 7 дней"),
+    ("bank", "Личный виртуальный баланс"),
     ("markets", "События Polymarket"),
     ("market", "Привязать рынок к карте"),
     ("map", "Подтвердить номер карты"),
@@ -111,6 +112,7 @@ HELP = """🤖 <b>Betbot · админка</b>
 /history — исторический отчёт Tier 1 и CSV
 /threshold 0.55 — порог выраженного сигнала; в режиме «все карты» ровные тоже публикуются
 /stats — итоги за 7 дней
+/bank — личный виртуальный банк и сумма ставки
 /export — история CSV
 /demo — условный пример карточки
 
@@ -231,6 +233,13 @@ def build_router(service: Service) -> Router:
     async def leagues(message: Message):
         args = message.text.split(maxsplit=1)
         await leagues_reply(message, args[1] if len(args) == 2 else "")
+
+    @router.message(Command("bank"))
+    async def bank_message(message: Message):
+        if message.chat.id != message.from_user.id:
+            return
+        clear_input(message.from_user.id)
+        await show(message, ui.paper_bank(service, message.from_user.id))
 
     @router.message(Command("watch", "unwatch"))
     async def watch(message: Message):
@@ -736,6 +745,15 @@ def build_router(service: Service) -> Router:
     async def navigate(callback: CallbackQuery):
         args = callback.data.split(":")
         action, user_id = args[1], callback.from_user.id
+        if action.startswith("paper") and (
+            not isinstance(callback.message, Message)
+            or callback.message.chat.type != ChatType.PRIVATE
+            or callback.message.chat.id != user_id
+        ):
+            await callback.answer(
+                "Виртуальный банк доступен только в личной админке.", show_alert=True
+            )
+            return
         if action in (
             "tournaments",
             "tournament-refresh",
@@ -759,6 +777,46 @@ def build_router(service: Service) -> Router:
             for view in ("current", "selected", "archive"):
                 service.store.set(f"ui_filter:{user_id}:{view}", "")
             screen = ui.home(service)
+        elif action.startswith("paper"):
+            from .paper_bank import PaperBank
+
+            bank = PaperBank(service.store)
+            if action in ("paper-new", "paper-stake"):
+                if action == "paper-stake" and not bank.session(user_id):
+                    screen = ui.paper_bank(service, user_id)
+                else:
+                    service.store.set(f"ui_input:{user_id}", {"kind": action})
+                    text = (
+                        "💰 <b>Новый виртуальный банк</b>\n\nПришлите два числа: начальный баланс и сумму ставки.\nНапример: <code>10000 100</code>\n\nНачнём с новых прогнозов после сохранения. История предыдущего банка сохранится отдельно."
+                        if action == "paper-new"
+                        else "💵 <b>Сумма ставки</b>\n\nПришлите сумму, например <code>100</code>. Она применяется только к новым ставкам."
+                    )
+                    screen = ui.panel(text, [], "ui:paper")
+            elif action == "paper-history" and len(args) == 4:
+                screen = ui.paper_history(service, user_id, int(args[2]), max(0, int(args[3])))
+            elif action == "paper-sessions":
+                rows = bank.sessions(user_id)
+                screen = ui.panel(
+                    "💰 <b>Ваши виртуальные банки</b>",
+                    [
+                        [
+                            ui.button(
+                                f"Банк #{row['id']} · {row['started_at'][:10]}",
+                                f"ui:paper-session:{row['id']}",
+                            )
+                        ]
+                        for row in rows
+                    ],
+                    "ui:paper",
+                )
+            else:
+                if action in ("paper-pause", "paper-notify"):
+                    bank.toggle(user_id, "active" if action == "paper-pause" else "notifications")
+                screen = ui.paper_bank(
+                    service,
+                    user_id,
+                    int(args[2]) if action == "paper-session" and len(args) == 3 else None,
+                )
         elif action in ("tournaments", "tournament-refresh", "tournament-repeat"):
             page = max(0, int(args[2]))
             service.start_tournament_refresh(force=action == "tournament-refresh")
@@ -1083,6 +1141,26 @@ def build_router(service: Service) -> Router:
             await cancel(message)
             return
         state = service.store.get(f"ui_input:{message.from_user.id}")
+        if state and state.get("kind") in ("paper-new", "paper-stake"):
+            if message.chat.id != message.from_user.id:
+                return
+            from .paper_bank import PaperBank, parse_money
+
+            bank = PaperBank(service.store)
+            try:
+                if state["kind"] == "paper-new":
+                    values = message.text.split()
+                    if len(values) != 2:
+                        raise ValueError("Нужны два числа: баланс и ставка. Например: 10000 100.")
+                    bank.start(message.from_user.id, parse_money(values[0]), parse_money(values[1]))
+                else:
+                    bank.change_stake(message.from_user.id, parse_money(message.text))
+            except ValueError as exc:
+                await message.answer(esc(str(exc), 250))
+                return
+            clear_input(message.from_user.id)
+            await show(message, ui.paper_bank(service, message.from_user.id, notice="Сохранено."))
+            return
         if state and state.get("kind") == "league-search":
             query = message.text.strip()[:80]
             clear_input(message.from_user.id)

@@ -75,10 +75,96 @@ def home(service):
                 button("📣 Куда публиковать", "ui:destinations"),
             ],
             [button("💱 Источники", "ui:sources"), button("📊 Отчёты", "ui:stats:today")],
+            [button("💰 Виртуальный банк", "ui:paper")],
             [button("📬 Предпросмотры", "ui:pending"), button("🧠 Модель", "ui:model")],
             [button("🛠 Состояние", "ui:status"), button("❔ Помощь", "ui:help")],
         ],
     )
+
+
+def paper_bank(service, owner, identity=None, notice=""):
+    from .paper_bank import PaperBank, money
+
+    summary = PaperBank(service.store).summary(owner, identity)
+    if not summary:
+        return panel(
+            "💰 <b>Виртуальный банк</b>\n\nЗадайте начальный баланс и одинаковую сумму ставки на каждый новый опубликованный прогноз. Бот посчитает результат по первому кэфу Polymarket из исходной карточки.\n\nБаланс и сообщения доступны только вам в личном чате. Это учебный расчёт без комиссий.",
+            [[button("＋ Задать баланс и ставку", "ui:paper-new")]],
+            "ui:home",
+        )
+    counts = summary["counts"]
+    profit = summary["profit"]
+    text = f"💰 <b>Виртуальный банк #{summary['id']}</b>\n\nБаланс: <b>{money(summary['equity'])}</b>\nСвободно: <b>{money(summary['cash_cents'])}</b>\nВ открытых ставках: {money(summary['reserved'])}\nСтарт: {money(summary['initial_cents'])} · ставка {money(summary['stake_cents'])}\n\nПрибыль: <b>{'+' if profit > 0 else ''}{money(profit)}</b>\n✅ {counts.get('won', 0)} · ❌ {counts.get('lost', 0)} · ⏳ {counts.get('open', 0)} · пропущено {counts.get('skipped', 0)}"
+    if summary["turnover"]:
+        text += f"\nДоходность по рассчитанным ставкам: {profit / summary['turnover']:+.1%}"
+    text += "\n\nПервый кэф из прогноза фиксируется навсегда. Без исходного кэфа или при нехватке денег карта пропускается. Суммы — виртуальные единицы."
+    if notice:
+        text += "\n\n" + esc(notice, 250)
+    closed = bool(summary["closed_at"])
+    buttons = [
+        [
+            button("📋 История ставок", f"ui:paper-history:{summary['id']}:0"),
+            button("↻ Обновить", f"ui:paper-session:{summary['id']}"),
+        ]
+    ]
+    if not closed:
+        buttons += [
+            [
+                button("⏸ Пауза" if summary["active"] else "▶ Продолжить", "ui:paper-pause"),
+                button("💵 Сумма ставки", "ui:paper-stake"),
+            ],
+            [
+                button(
+                    "🔔 Уведомления ✓" if summary["notifications"] else "🔕 Уведомления: выкл.",
+                    "ui:paper-notify",
+                )
+            ],
+            [button("＋ Новый банк", "ui:paper-new"), button("Прошлые банки", "ui:paper-sessions")],
+        ]
+        text += "\nРежим: " + (
+            "считаем новые карты"
+            if summary["active"]
+            else "пауза; открытые ставки продолжают рассчитываться"
+        )
+    return panel(text, buttons, "ui:paper" if closed else "ui:home")
+
+
+def paper_history(service, owner, identity, page=0):
+    import json
+
+    from .domain import Prediction
+    from .paper_bank import SKIPS, PaperBank, money
+
+    bank = PaperBank(service.store)
+    if not bank.session(owner, identity):
+        return paper_bank(service, owner)
+    rows = bank.history(owner, identity, page)
+    text = f"📋 <b>Банк #{identity} · история ставок</b>\n"
+    for row in rows:
+        saved = json.loads(row["snapshot"])
+        p = Prediction.from_dict(saved["prediction"])
+        p.draft = p.draft.with_team_aliases(service.store.get("team_aliases", {}))
+        icon = {"open": "⏳", "won": "✅", "lost": "❌", "skipped": "⏭"}[row["state"]]
+        detail = (
+            SKIPS[row["reason"]]
+            if row["state"] == "skipped"
+            else f"{money(row['stake_cents'])} × {row['odds']}"
+        )
+        if row["state"] in ("won", "lost"):
+            profit = row["payout_cents"] - row["stake_cents"]
+            detail += f" · {'+' if profit > 0 else ''}{money(profit)}"
+        text += f"\n{icon} <b>{esc(p.favorite_name, 48)}</b> · карта {p.draft.map_number or '?'}\n{esc(p.league_name or str(p.draft.league_id), 65)}\n{detail}\n"
+    if not rows:
+        text += "\nСтавок пока нет. Учитываются новые опубликованные прогнозы после создания банка."
+    buttons = []
+    navigation = []
+    if page:
+        navigation.append(button("‹ Новее", f"ui:paper-history:{identity}:{page - 1}"))
+    if len(rows) == 10:
+        navigation.append(button("Старее ›", f"ui:paper-history:{identity}:{page + 1}"))
+    if navigation:
+        buttons.append(navigation)
+    return panel(text, buttons, f"ui:paper-session:{identity}")
 
 
 def tournaments(service, view="current", page=0, query=""):

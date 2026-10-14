@@ -816,6 +816,7 @@ class Service:
                 uncertain += 1
                 continue
             self.store.finish_delivery(delivery, "sent", msg.message_id)
+            self.capture_paper_bets()
             self.store.health(f"Telegram {chat_id}", True, "Карточка доставлена")
             sent += 1
         messages = [
@@ -1253,6 +1254,60 @@ class Service:
         except Exception:
             self.store.finish_report(period, chat_id, "uncertain")
 
+    def capture_paper_bets(self):
+        from .paper_bank import PaperBank
+
+        try:
+            PaperBank(self.store).capture(
+                self.settings.admins, max_quote_age=self.settings.quote_max_age_seconds
+            )
+        except Exception as exc:
+            self.store.health("Виртуальный банк", False, type(exc).__name__)
+
+    async def paper_bets(self):
+        from .paper_bank import PaperBank, notification_text
+
+        bank = PaperBank(self.store)
+        self.capture_paper_bets()
+        try:
+            bank.settle(self.settings.admins)
+        except Exception as exc:
+            self.store.health("Виртуальный банк", False, type(exc).__name__)
+            return
+        if not self.bot:
+            return
+        for notification in bank.notifications(self.settings.admins):
+            if not bank.begin_notification(notification["id"]):
+                continue
+            try:
+                message = await self.bot.send_message(
+                    notification["owner_id"],
+                    notification_text(notification, self.store.get("team_aliases", {})),
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [
+                                InlineKeyboardButton(
+                                    text="💰 Мой виртуальный банк", callback_data="ui:paper"
+                                )
+                            ]
+                        ]
+                    ),
+                )
+            except TelegramRetryAfter as exc:
+                bank.finish_notification(
+                    notification["id"],
+                    "planned",
+                    error=type(exc).__name__,
+                    retry_after=exc.retry_after + 1,
+                )
+                break
+            except (TelegramBadRequest, TelegramForbiddenError) as exc:
+                bank.finish_notification(notification["id"], "failed", error=type(exc).__name__)
+            except Exception as exc:
+                bank.finish_notification(notification["id"], "uncertain", error=type(exc).__name__)
+            else:
+                bank.finish_notification(notification["id"], "sent", message.message_id)
+
     async def tick(self):
         if self.tick_lock.locked():
             return
@@ -1297,6 +1352,7 @@ class Service:
                 except Exception as exc:
                     self.store.health("Разборы", False, type(exc).__name__)
             await self.collect_results()
+            await self.paper_bets()
             if self.automatic and not self.paused:
                 for identity in self.store.pending_publications():
                     row = self.store.forecast(identity)
