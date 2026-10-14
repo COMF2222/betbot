@@ -158,6 +158,17 @@ async def test_paper_bank_invalid_input_does_not_create_account_and_group_cannot
     assert len(session.requests) == before
 
 
+async def test_paper_session_dates_use_moscow_even_across_utc_midnight(routed_bot):
+    from datetime import UTC
+
+    from betbot.paper_bank import PaperBank
+
+    bot, dispatcher, service, session = routed_bot
+    PaperBank(service.store).start(1, 100000, 10000, now=datetime(2026, 10, 13, 22, 30, tzinfo=UTC))
+    await press(bot, dispatcher, "ui:paper-sessions")
+    assert "14.10 01:30" in session.requests[-1].reply_markup.inline_keyboard[0][0].text
+
+
 @pytest.mark.parametrize("text", ["/leagues", "лиги", "турниры BLAST"])
 async def test_first_use_shows_available_leagues_without_selected_league(routed_bot, text):
     bot, dispatcher, _, session = routed_bot

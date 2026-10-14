@@ -32,9 +32,9 @@ from . import admin_ui as ui
 from .config import Settings
 from .demo import demo_prediction
 from .destinations import BindingError, validate_destination
-from .domain import utcnow
+from .domain import timestamp, utcnow
 from .network import route_label, telegram_bot, telegram_proxy
-from .presentation import caption, esc, explanation, render_card
+from .presentation import MOSCOW, caption, esc, explanation, render_card
 from .providers import BOOKMAKERS, normalized
 from .service import Service
 from .storage import Store
@@ -801,7 +801,7 @@ def build_router(service: Service) -> Router:
                     [
                         [
                             ui.button(
-                                f"Банк #{row['id']} · {row['started_at'][:10]}",
+                                f"Банк #{row['id']} · {timestamp(row['started_at']).astimezone(MOSCOW):%d.%m %H:%M}",
                                 f"ui:paper-session:{row['id']}",
                             )
                         ]
