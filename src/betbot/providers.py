@@ -500,7 +500,22 @@ class Polymarket:
             book = await self.http.get(
                 "https://clob.polymarket.com/book", {"token_id": str(asset_id)}
             )
-            selected = self.displayed_price(book)
+            # /book can repeat the market's latest trade for BOTH outcome tokens.
+            # Use its levels for a tight midpoint, but fetch the last trade by
+            # token when the spread is wide. Never use the sibling's trade price.
+            selected = self.displayed_price({**book, "last_trade_price": None})
+            if not selected:
+                trade = await self.http.get(
+                    "https://clob.polymarket.com/last-trade-price", {"token_id": str(asset_id)}
+                )
+                selected = self.displayed_price(
+                    {
+                        **book,
+                        "last_trade_price": trade.get("price")
+                        if trade.get("side") in ("BUY", "SELL")
+                        else None,
+                    }
+                )
             if not selected:
                 continue
             price, ask_odds, liquidity = selected

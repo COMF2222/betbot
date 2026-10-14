@@ -10,7 +10,7 @@ from .domain import Prediction, timestamp, utcnow
 from .presentation import esc, market_snapshot, tournament_line
 
 SKIPS = {
-    "no_initial_odds": "нет первого кэфа в исходном прогнозе",
+    "no_initial_odds": "при публикации прогноза не удалось получить кэф на эту карту",
     "already_finished": "результат уже известен, новую ставку не открываем",
     "insufficient": "не хватает свободного баланса",
 }

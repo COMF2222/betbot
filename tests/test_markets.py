@@ -192,7 +192,13 @@ async def test_verified_aliases_match_the_exact_map_without_swapping_sides(draft
     }
     assert Polymarket.find_event(raw, [event]) is None
     assert Polymarket.find_event(raw, [event], aliases) == event
-    http = FakeHTTP({"asks": [{"price": "0.5", "size": "20"}], "last_trade_price": "0.5"})
+    http = FakeHTTP(
+        {
+            "asks": [{"price": "0.51", "size": "20"}],
+            "bids": [{"price": "0.49", "size": "20"}],
+            "last_trade_price": "0.5",
+        }
+    )
     quotes = await Polymarket(http).quotes(raw, event, aliases)
     assert [q.outcome for q in quotes] == ["dire", "radiant"]
     assert all(q.map_number == 2 and q.match_id == raw.match_id for q in quotes)

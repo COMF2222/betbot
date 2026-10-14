@@ -98,6 +98,134 @@ async def test_history_keeps_token_map_and_historical_timestamp_and_filters_futu
     assert calls[0][1]["market"] == "token-2"
 
 
+def exact_event(draft):
+    return {
+        "slug": "zxcursed-alohadance",
+        "markets": [
+            {
+                "id": "map-2",
+                "question": "Game 2 Winner",
+                "sportsMarketType": "child_moneyline",
+                "acceptingOrders": True,
+                "outcomes": [draft.radiant_name, draft.dire_name],
+                "clobTokenIds": ["radiant-token", "dire-token"],
+            },
+            {
+                "id": "series",
+                "question": "Match Winner",
+                "sportsMarketType": "moneyline",
+                "acceptingOrders": True,
+                "outcomes": [draft.radiant_name, draft.dire_name],
+                "clobTokenIds": ["series-radiant", "series-dire"],
+            },
+        ],
+    }
+
+
+async def test_wide_spread_reads_each_tokens_trade_instead_of_shared_book_price(draft):
+    calls = []
+
+    class HTTP:
+        async def get(self, url, params):
+            calls.append((url, params))
+            if url.endswith("/book"):
+                return {
+                    "bids": [{"price": "0.02", "size": "20"}],
+                    "asks": [{"price": "0.98", "size": "10"}],
+                    # Real incident: both books exposed the SAME side's 4% trade.
+                    "last_trade_price": "0.04",
+                }
+            assert url.endswith("/last-trade-price")
+            return {
+                "price": "0.98" if params["token_id"] == "radiant-token" else "0.04",
+                "side": "BUY",
+            }
+
+    quotes = await Polymarket(HTTP()).quotes(draft, exact_event(draft))
+    assert len(quotes) == 2
+    assert [q.odds for q in quotes] == pytest.approx([1 / 0.98, 25])
+    assert all(q.map_number == 2 and q.market_id == "map-2" for q in quotes)
+    assert [q.token_id for q in quotes] == ["radiant-token", "dire-token"]
+    assert len(calls) == 4
+    assert {params["token_id"] for _, params in calls} == {"radiant-token", "dire-token"}
+
+
+@pytest.mark.parametrize(
+    "trade",
+    [
+        {"price": "0.5", "side": ""},
+        {"price": "0.5"},
+        {"price": "NaN", "side": "BUY"},
+        {"price": "1", "side": "SELL"},
+    ],
+)
+async def test_placeholder_or_invalid_token_trade_does_not_become_initial_odds(draft, trade):
+    class HTTP:
+        async def get(self, url, params):
+            if url.endswith("/book"):
+                return {"bids": [], "asks": [], "last_trade_price": "0.5"}
+            return trade
+
+    assert await Polymarket(HTTP()).quotes(draft, exact_event(draft)) == []
+
+
+async def test_inconsistent_token_trades_still_rejected(draft):
+    class HTTP:
+        async def get(self, url, params):
+            if url.endswith("/book"):
+                return {"last_trade_price": "0.5"}
+            return {"price": "0.99", "side": "BUY"}
+
+    assert await Polymarket(HTTP()).quotes(draft, exact_event(draft)) == []
+
+
+async def test_narrow_spread_uses_midpoint_without_trade_request(draft):
+    class HTTP:
+        async def get(self, url, params):
+            assert url.endswith("/book")
+            return {
+                "bids": [{"price": "0.49", "size": "10"}],
+                "asks": [{"price": "0.51", "size": "10"}],
+                "last_trade_price": "0.04",
+            }
+
+    quotes = await Polymarket(HTTP()).quotes(draft, exact_event(draft))
+    assert len(quotes) == 2 and all(q.odds == 2 for q in quotes)
+
+
+async def test_recovered_token_price_opens_paper_stake_at_publication(tmp_path, prediction):
+    from betbot.paper_bank import PaperBank
+    from betbot.storage import Store
+
+    class HTTP:
+        async def get(self, url, params):
+            if url.endswith("/book"):
+                return {"last_trade_price": "0.04"}
+            return {
+                "price": "0.68" if params["token_id"] == "radiant-token" else "0.33",
+                "side": "BUY",
+            }
+
+    store = Store(tmp_path / "ledger.sqlite3")
+    try:
+        bank = PaperBank(store)
+        bank.start(1, 100000, 10000)
+        draft = replace(prediction.draft, observed_at=utcnow())
+        quotes = await Polymarket(HTTP()).quotes(draft, exact_event(draft))
+        p = replace(prediction, draft=draft, radiant_probability=0.6, quotes=quotes)
+        store.observe(draft, "observed")
+        identity = store.add_forecast(p)
+        delivery = store.begin_delivery(identity, "forecast", -100)
+        store.finish_delivery(delivery, "sent", 1)
+        bank.capture({1})
+        bet = bank.history(1)[0]
+        assert bet["state"] == "open" and bet["odds"] == "1.47"
+        assert bank.summary(1)["cash_cents"] == 90000
+        assert bank.summary(1)["reserved"] == 10000
+    finally:
+        store.close()
+
+
 def test_later_quote_attachment_does_not_claim_a_forecast_time_price(prediction):
     now = utcnow()
     late = Quote(
