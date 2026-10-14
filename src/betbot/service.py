@@ -21,6 +21,7 @@ from aiogram.types import (
 from .config import Settings
 from .domain import Draft, Prediction, timestamp, utcnow
 from .leagues import activity_snapshot, calendar_events
+from .market_status import MARKET_ISSUES
 from .model import History, Model
 from .presentation import MOSCOW, caption, market_snapshot, render_card, result_text
 from .providers import (
@@ -516,6 +517,7 @@ class Service:
 
     async def collect_quotes(self, draft: Draft) -> list:
         quotes = []
+        status = {"code": "market_disabled", "map_number": draft.map_number, "event_id": None}
         if self.store.get("source:Polymarket", True):
             try:
                 binding = self.store.get(f"poly:{draft.match_id}")
@@ -532,16 +534,27 @@ class Service:
                         current = await self.poly.event(str(event["id"]))
                         event = self.automatic_market_event(draft, [current], aliases)
                 if event:
+                    status["event_id"] = str(event["id"])
                     quotes.extend(await self.poly.quotes(draft, event, aliases))
+                    _, issue = self.poly.select_market(draft, event, aliases)
+                    status["code"] = "available" if quotes else issue or "prices_unavailable"
                     if quotes and not binding:
                         self.store.set(f"poly:{draft.match_id}", str(event["id"]))
+                else:
+                    status["code"] = "market_unmatched"
                 self.store.health(
                     "Polymarket",
-                    True,
-                    f"{len(quotes)} котировок; {'рынок привязан' if event else 'нужна подтверждённая привязка /market или /polyfilter'}",
+                    bool(quotes),
+                    f"Карта {draft.map_number}: {len(quotes)} котировок"
+                    if quotes
+                    else MARKET_ISSUES[status["code"]],
                 )
             except Exception as exc:
+                status["code"] = "market_source_error"
                 self.store.health("Polymarket", False, str(exc))
+        self.store.set(
+            f"market_status:{draft.match_id}", {**status, "checked_at": utcnow().isoformat()}
+        )
         if self.feed:
             try:
                 quotes.extend(await self.feed.quotes(draft))
@@ -677,6 +690,10 @@ class Service:
             self.store.mark(draft.match_id, "skipped", "нет достаточно выраженного фаворита")
             return None
         p.quotes = await self.collect_quotes(draft)
+        p.analysis = {
+            **p.analysis,
+            "market_status": self.store.get(f"market_status:{draft.match_id}", {}),
+        }
         p.league_name = next(
             (r["name"] for r in self.store.leagues() if r["id"] == draft.league_id), ""
         )
@@ -1007,7 +1024,11 @@ class Service:
                         f"quote_attached:{forecast_id}:{target['destination']}", []
                     )
                 ]
-                baseline = comparable_quote(p, p.quotes or attached, current) or current
+                baseline = (
+                    current
+                    if state
+                    else comparable_quote(p, p.quotes or attached, current) or current
+                )
                 state = {
                     "market_key": identity(current),
                     "reference": baseline.odds,

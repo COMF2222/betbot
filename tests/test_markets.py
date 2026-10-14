@@ -73,6 +73,25 @@ def test_only_exact_map_winner_is_accepted():
     assert not Polymarket.map_market({**base, "closed": True}, 2)
 
 
+def test_map_selection_explains_missing_final_map_and_never_substitutes_series(draft):
+    final = replace(draft, map_number=3)
+    series = {
+        "id": "series",
+        "question": "Match Winner",
+        "sportsMarketType": "moneyline",
+        "acceptingOrders": True,
+        "outcomes": [draft.radiant_name, draft.dire_name],
+        "clobTokenIds": ["a", "b"],
+    }
+    event = {"score": "1-1", "markets": [series]}
+    assert Polymarket.select_market(final, event) == (None, "map_market_missing")
+    closed = {**series, "id": "map-3", "question": "Game 3 Winner", "closed": True}
+    assert Polymarket.select_market(final, {"markets": [series, closed]}) == (
+        None,
+        "map_market_closed",
+    )
+
+
 class FakeHTTP:
     def __init__(self, result):
         self.result = result

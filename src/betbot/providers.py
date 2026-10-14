@@ -378,7 +378,13 @@ class Polymarket:
         for offset in range(0, 1000, 100):
             page = await self.http.get(
                 "https://gamma-api.polymarket.com/events",
-                {"tag_id": tag, "closed": "false", "limit": 100, "offset": offset},
+                {
+                    "tag_id": tag,
+                    "closed": "false",
+                    "limit": 100,
+                    "offset": offset,
+                    "_t": int(utcnow().timestamp()),
+                },
             )
             if not isinstance(page, list):
                 raise ProviderError("Изменилась схема каталога Polymarket")
@@ -391,10 +397,15 @@ class Polymarket:
     async def event(self, event_id: str) -> dict:
         if not event_id.isdigit():
             raise ProviderError("Ожидается числовой event ID")
-        return await self.http.get(f"https://gamma-api.polymarket.com/events/{event_id}")
+        # Gamma's CDN otherwise caches this response for five minutes, including
+        # the list of map markets and their acceptingOrders state.
+        return await self.http.get(
+            f"https://gamma-api.polymarket.com/events/{event_id}",
+            {"_t": int(utcnow().timestamp())},
+        )
 
     @staticmethod
-    def displayed_price(book):
+    def displayed_price(book, max_spread=0.1):
         def levels(side):
             result = []
             for level in book.get(side, []):
@@ -415,7 +426,7 @@ class Polymarket:
         ask = min((p for p, _ in asks), default=None)
         bid = max((p for p, _ in bids), default=None)
         price = None
-        if ask is not None and bid is not None and 0 <= ask - bid <= 0.1 + 1e-9:
+        if ask is not None and bid is not None and 0 <= ask - bid <= max_spread + 1e-9:
             price = (ask + bid) / 2
         elif ask is None or bid is None or ask >= bid:
             try:
@@ -460,8 +471,8 @@ class Polymarket:
         return set(words) <= actual
 
     @staticmethod
-    def map_market(raw: dict, map_number: int) -> bool:
-        if raw.get("closed") or not raw.get("acceptingOrders", False):
+    def map_market(raw: dict, map_number: int, require_open=True) -> bool:
+        if require_open and (raw.get("closed") or not raw.get("acceptingOrders", False)):
             return False
         label = f"{raw.get('groupItemTitle', '')} {raw.get('question', '')}"
         numbers = re.findall(r"(?:game|map|карта)\s*(\d+)\s*(?:winner|победитель)", label, re.I)
@@ -471,17 +482,23 @@ class Polymarket:
             and raw.get("sportsMarketType") in ("child_moneyline", "moneyline")
         )
 
-    async def quotes(
-        self, draft: Draft, event: dict, outcome_aliases: dict | None = None
-    ) -> list[Quote]:
+    @classmethod
+    def select_market(cls, draft, event, outcome_aliases=None):
         if not draft.map_number:
-            return []
+            return None, "map_unknown"
         aliases = outcome_aliases or {}
         rname = normalized(aliases.get(str(draft.radiant_id), draft.radiant_name))
         dname = normalized(aliases.get(str(draft.dire_id), draft.dire_name))
-        matching = [m for m in event.get("markets", []) if self.map_market(m, draft.map_number)]
+        candidates = [
+            m for m in event.get("markets", []) if cls.map_market(m, draft.map_number, False)
+        ]
+        if not candidates:
+            return None, "map_market_missing"
+        matching = [m for m in candidates if cls.map_market(m, draft.map_number)]
+        if not matching:
+            return None, "map_market_closed"
         if len(matching) != 1:
-            return []
+            return None, "market_ambiguous"
         market = matching[0]
         outcomes = json_list(market.get("outcomes"))
         ids = (
@@ -494,8 +511,25 @@ class Polymarket:
             or len(ids) != 2
             or {normalized(x) for x in outcomes} != {rname, dname}
         ):
+            return None, "market_identity"
+        return market, ""
+
+    async def quotes(
+        self, draft: Draft, event: dict, outcome_aliases: dict | None = None
+    ) -> list[Quote]:
+        market, _ = self.select_market(draft, event, outcome_aliases)
+        if not market:
             return []
-        result = []
+        aliases = outcome_aliases or {}
+        rname = normalized(aliases.get(str(draft.radiant_id), draft.radiant_name))
+        outcomes = json_list(market.get("outcomes"))
+        ids = json_list(
+            market.get("positionIds")
+            if market.get("version") == "v2"
+            else market.get("clobTokenIds")
+        )
+        result, midpoints = [], []
+        traded = False
         for name, asset_id in zip(outcomes, ids, strict=True):
             book = await self.http.get(
                 "https://clob.polymarket.com/book", {"token_id": str(asset_id)}
@@ -504,6 +538,7 @@ class Polymarket:
             # Use its levels for a tight midpoint, but fetch the last trade by
             # token when the spread is wide. Never use the sibling's trade price.
             selected = self.displayed_price({**book, "last_trade_price": None})
+            midpoint = self.displayed_price({**book, "last_trade_price": None}, max_spread=1)
             if not selected:
                 trade = await self.http.get(
                     "https://clob.polymarket.com/last-trade-price", {"token_id": str(asset_id)}
@@ -516,36 +551,51 @@ class Polymarket:
                         else None,
                     }
                 )
-            if not selected:
-                continue
-            price, ask_odds, liquidity = selected
+                traded = traded or bool(selected)
             # Book timestamp often means last mutation, not this read. Observed_at is the
             # current direct read; changed timestamp is retained in market metadata separately.
-            result.append(
-                Quote(
-                    source=self.name,
-                    match_id=draft.match_id,
-                    market="map_winner",
-                    outcome="radiant" if normalized(name) == rname else "dire",
-                    odds=1 / price,
-                    observed_at=utcnow(),
-                    source_updated_at=None,
-                    map_number=draft.map_number,
-                    rules="polymarket:" + str(market.get("conditionId") or market["id"]),
-                    url="https://polymarket.com/event/" + str(event.get("slug", "")),
-                    gross=True,
-                    liquidity=liquidity,
-                    market_id=str(market["id"]),
-                    price_kind="market",
-                    token_id=str(asset_id),
-                    ask_odds=ask_odds,
+            for selection, target, basis in (
+                (selected, result, ""),
+                (midpoint, midpoints, "midpoint_fallback"),
+            ):
+                if not selection:
+                    continue
+                price, ask_odds, liquidity = selection
+                target.append(
+                    Quote(
+                        source=self.name,
+                        match_id=draft.match_id,
+                        market="map_winner",
+                        outcome="radiant" if normalized(name) == rname else "dire",
+                        odds=1 / price,
+                        observed_at=utcnow(),
+                        source_updated_at=None,
+                        map_number=draft.map_number,
+                        rules="polymarket:" + str(market.get("conditionId") or market["id"]),
+                        url="https://polymarket.com/event/" + str(event.get("slug", "")),
+                        gross=True,
+                        liquidity=liquidity,
+                        market_id=str(market["id"]),
+                        price_kind="market",
+                        token_id=str(asset_id),
+                        ask_odds=ask_odds,
+                        price_basis=basis,
+                    )
                 )
-            )
         # Last trades can be stale or inconsistent after settlement even while Gamma
         # still marks the market open. Never display two mutually exclusive 99% prices.
-        if len(result) == 2 and abs(sum(1 / q.odds for q in result) - 1) > 0.10 + 1e-9:
-            return []
-        return result
+        if len(result) == 2 and abs(sum(1 / q.odds for q in result) - 1) <= 0.10 + 1e-9:
+            return result
+        # Last trades of the two tokens can be from different moments. The current
+        # two-sided book supplies a coherent market reference even in that case.
+        # Mark it explicitly; do not turn untraded 50/50 placeholders into prices.
+        if (
+            traded
+            and len(midpoints) == 2
+            and abs(sum(1 / q.odds for q in midpoints) - 1) <= 0.02 + 1e-9
+        ):
+            return midpoints
+        return result if len(result) < 2 else []
 
     async def history(self, quotes, start, end):
         """One-minute chart samples; never used as a forecast-time quote."""
@@ -557,6 +607,7 @@ class Polymarket:
                 q.source != self.name
                 or q.market != "map_winner"
                 or q.price_kind != "market"
+                or q.price_basis == "midpoint_fallback"
                 or not q.token_id
             ):
                 continue

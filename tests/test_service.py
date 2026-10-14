@@ -78,6 +78,41 @@ async def test_known_league_gets_exact_map_quotes_without_manual_filter(service,
     service.poly.event.assert_awaited_once_with("7")
 
 
+async def test_absent_map_market_reason_is_saved_with_forecast(service, draft):
+    from betbot.paper_bank import PaperBank
+
+    service.store.league(draft.league_id, "Example Cup", True)
+    event = {
+        "id": "7",
+        "title": "Example Cup",
+        "startTime": draft.observed_at.isoformat(),
+        "teams": [{"name": draft.radiant_name}, {"name": draft.dire_name}],
+        "markets": [
+            {
+                "id": "series",
+                "question": "Match Winner",
+                "acceptingOrders": True,
+                "sportsMarketType": "moneyline",
+            }
+        ],
+    }
+    service.poly.discover = AsyncMock(return_value=[event])
+    service.poly.event = AsyncMock(return_value=event)
+    service.collect_quotes = lambda d: Service.collect_quotes(service, d)
+    bank = PaperBank(service.store)
+    bank.start(1, 100000, 10000)
+    identity = await service.process_draft(draft)
+    row = service.store.forecast(identity)
+    saved = json.loads(row["payload"])
+    assert saved["analysis"]["market_status"]["code"] == "map_market_missing"
+    assert saved["analysis"]["market_status"]["event_id"] == "7"
+    service.store.set(f"market_status:{draft.match_id}", {"code": "available"})
+    delivery = service.store.begin_delivery(identity, "forecast", -100)
+    service.store.finish_delivery(delivery, "sent", 1)
+    bank.capture({1})
+    assert bank.history(1)[0]["reason"] == "map_market_missing"
+
+
 async def test_tournament_check_disambiguates_same_team_pairs(service, draft):
     service.store.league(draft.league_id, "EPL Masters 2026 ", True)
     base = {

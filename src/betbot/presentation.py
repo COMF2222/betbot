@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from PIL import ImageFont
 
 from .domain import Prediction, Quote, best_quotes, timestamp, utcnow
+from .market_status import MARKET_ISSUES
 from .timing import timing_note
 
 MOSCOW = ZoneInfo("Europe/Moscow")
@@ -129,9 +130,12 @@ def caption(p: Prediction, max_age: int = 30, heroes=None, now=None) -> str:
         line = f"{label}: {esc(p.favorite_name, 45)} <b>{own.odds:.2f}</b> ({probability:.0%})"
         if other:
             line += f", {esc(opponent, 45)} {other.odds:.2f}"
+        if own.price_basis == "midpoint_fallback":
+            line += " · ориентир по стакану"
         info.append(line)
     else:
-        info.append("Рынок: кэф на эту карту пока недоступен.")
+        issue = p.analysis.get("market_status", {}).get("code")
+        info.append("Рынок: " + MARKET_ISSUES.get(issue, "кэф на эту карту пока недоступен") + ".")
     lines.append("ℹ️ " + " ".join(info))
     if note := timing_note(p):
         lines.append("⏱ " + note)
@@ -222,6 +226,8 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
     signal = f"{p.favorite_probability:.0%}, {stars(p.favorite_probability)}"
     own, _, market_probability = market_snapshot(p)
     price = f", кэф {own.odds:.2f}" if own else ""
+    if own and own.price_basis == "midpoint_fallback":
+        price += " (ориентир по стакану)"
     if own and (own.observed_at - p.draft.observed_at).total_seconds() > 30:
         price += f" (на {own.observed_at.astimezone(MOSCOW):%H:%M})"
     if win:
@@ -254,6 +260,7 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
                         q.rules,
                         q.gross,
                         q.market_id,
+                        q.price_basis,
                     )
                     != (
                         own.source,
@@ -263,6 +270,7 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
                         own.rules,
                         own.gross,
                         own.market_id,
+                        own.price_basis,
                     )
                     or q.price_kind != own.price_kind
                     or not q.fresh(when, 30)

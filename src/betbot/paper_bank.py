@@ -7,9 +7,11 @@ from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from .domain import Prediction, timestamp, utcnow
+from .market_status import MARKET_ISSUES
 from .presentation import esc, market_snapshot, tournament_line
 
 SKIPS = {
+    **MARKET_ISSUES,
     "no_initial_odds": "при публикации прогноза не удалось получить кэф на эту карту",
     "already_finished": "результат уже известен, новую ставку не открываем",
     "insufficient": "не хватает свободного баланса",
@@ -179,6 +181,9 @@ class PaperBank:
                 reason = (
                     "already_finished" if row["result"] else "no_initial_odds" if not quote else ""
                 )
+                issue = p.analysis.get("market_status", {}).get("code")
+                if reason == "no_initial_odds" and issue in MARKET_ISSUES:
+                    reason = issue
                 current = self.session(session["owner_id"])
                 if not current or current["id"] != session["id"] or not current["active"]:
                     break
@@ -317,6 +322,8 @@ def notification_text(row, aliases=None):
     else:
         profit = row["payout_cents"] - row["stake_cents"]
         body = f"{'✅ Зашло' if row['bet_state'] == 'won' else '❌ Мимо'}: {match}\nИтог ставки: <b>{'+' if profit > 0 else ''}{money(profit)}</b> · кэф {row['odds']}"
+    if (snapshot.get("quote") or {}).get("price_basis") == "midpoint_fallback":
+        body += " · ориентир по стакану"
     return "\n".join(
         [
             title,

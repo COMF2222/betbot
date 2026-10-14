@@ -193,6 +193,93 @@ async def test_narrow_spread_uses_midpoint_without_trade_request(draft):
     assert len(quotes) == 2 and all(q.odds == 2 for q in quotes)
 
 
+async def test_conflicting_stale_trades_use_marked_current_book_midpoints(draft):
+    class HTTP:
+        async def get(self, url, params):
+            radiant = params["token_id"] == "radiant-token"
+            if url.endswith("/book"):
+                return {
+                    "bids": [{"price": "0.72" if radiant else "0.03", "size": "20"}],
+                    "asks": [{"price": "0.97" if radiant else "0.28", "size": "10"}],
+                    "last_trade_price": "0.72",
+                }
+            return {"price": "0.98" if radiant else "0.28", "side": "BUY"}
+
+    quotes = await Polymarket(HTTP()).quotes(draft, exact_event(draft))
+    assert len(quotes) == 2
+    assert [q.odds for q in quotes] == pytest.approx([1 / 0.845, 1 / 0.155])
+    assert [q.ask_odds for q in quotes] == pytest.approx([1 / 0.97, 1 / 0.28])
+    assert all(q.price_basis == "midpoint_fallback" and q.price_origin == "live" for q in quotes)
+    assert all(q.map_number == 2 and q.market_id == "map-2" for q in quotes)
+    p = replace(draft_prediction(draft), quotes=quotes)
+    assert "ориентир по стакану" in caption(p)
+
+
+def draft_prediction(draft):
+    from betbot.demo import demo_prediction
+
+    return replace(demo_prediction(), draft=draft)
+
+
+async def test_wide_untraded_placeholder_books_do_not_create_fake_midpoint_prices(draft):
+    class HTTP:
+        async def get(self, url, params):
+            if url.endswith("/book"):
+                return {
+                    "bids": [{"price": "0.02", "size": "20"}],
+                    "asks": [{"price": "0.98", "size": "20"}],
+                    "last_trade_price": "0.5",
+                }
+            return {"price": "0.5", "side": ""}
+
+    assert await Polymarket(HTTP()).quotes(draft, exact_event(draft)) == []
+
+
+async def test_incoherent_books_cannot_rescue_incoherent_last_trades(draft):
+    class HTTP:
+        async def get(self, url, params):
+            if url.endswith("/book"):
+                return {
+                    "bids": [{"price": "0.65", "size": "20"}],
+                    "asks": [{"price": "0.95", "size": "20"}],
+                }
+            return {"price": "0.98", "side": "BUY"}
+
+    assert await Polymarket(HTTP()).quotes(draft, exact_event(draft)) == []
+
+
+def test_price_basis_classes_do_not_mix_in_market_pairs_or_spike_reports(prediction):
+    now = utcnow()
+    a = Quote(
+        "Polymarket",
+        prediction.draft.match_id,
+        "map_winner",
+        "radiant",
+        1.5,
+        now,
+        None,
+        2,
+        price_kind="market",
+    )
+    b = replace(a, outcome="dire", odds=3, price_basis="midpoint_fallback")
+    assert market_pair([a, b]) is None
+    p = replace(prediction, quotes=[a], draft=replace(prediction.draft, observed_at=now))
+    when = now + timedelta(minutes=2)
+    text = result_text(
+        p,
+        {"radiant_win": True, "start_time": now.timestamp(), "duration": 1800},
+        [
+            {
+                "observed_at": when.isoformat(),
+                "quotes": [
+                    replace(a, odds=20, observed_at=when, price_basis="midpoint_fallback").to_dict()
+                ],
+            }
+        ],
+    )
+    assert "наблюдали до" not in text
+
+
 async def test_recovered_token_price_opens_paper_stake_at_publication(tmp_path, prediction):
     from betbot.paper_bank import PaperBank
     from betbot.storage import Store

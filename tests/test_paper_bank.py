@@ -104,6 +104,36 @@ def test_missing_original_quote_never_uses_later_attached_or_history_price(ledge
     assert bank.summary(1)["cash_cents"] == 100000
 
 
+def test_missing_map_reason_is_frozen_with_forecast_not_later_source_status(ledger, prediction):
+    bank = PaperBank(ledger)
+    bank.start(1, 100000, 10000)
+    p = replace(
+        prediction,
+        analysis={**prediction.analysis, "market_status": {"code": "map_market_missing"}},
+    )
+    identity, p = forecast(ledger, p, odds=None)
+    ledger.set(f"market_status:{p.draft.match_id}", {"code": "available"})
+    bank.capture({1})
+    bet = bank.history(1)[0]
+    assert bet["reason"] == "map_market_missing" and bet["state"] == "skipped"
+    assert "нет отдельного рынка победителя этой карты" in notification_text(
+        bank.notifications({1})[0]
+    )
+    assert ledger.forecast(identity)["payload"] == json.dumps(p.to_dict(), ensure_ascii=False)
+
+
+def test_midpoint_reference_is_fixed_and_marked_in_private_bank(ledger, prediction):
+    bank = PaperBank(ledger)
+    bank.start(1, 100000, 10000)
+    _, p = forecast(ledger, prediction, odds=1.18343195266, price_basis="midpoint_fallback")
+    bank.capture({1})
+    assert bank.history(1)[0]["odds"] == "1.18"
+    assert "ориентир по стакану" in notification_text(bank.notifications({1})[0])
+    ledger.result(p.draft.match_id, {"radiant_win": p.favorite == "radiant"})
+    bank.settle({1})
+    assert bank.summary(1)["profit"] == 1800
+
+
 @pytest.mark.parametrize(
     "changes",
     [

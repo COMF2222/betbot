@@ -343,6 +343,8 @@ def forecast_image(p, heroes=None, assets=None, demo=False):
         label = "В момент прогноза"
         if (quote_time - p.draft.observed_at).total_seconds() > 30:
             label = f"На {quote_time.astimezone(MOSCOW):%H:%M} МСК · позже прогноза"
+        if any(q.price_basis == "midpoint_fallback" for q in quotes.values()):
+            label += " · ориентир по стакану"
         c.text(80, 718, source.upper(), 15, bold=True, width=420, middle=True)
         c.text(1200, 718, label, 14, MUTED, width=660, right=True, middle=True)
         d.line((640, 741, 640, 769), fill=BORDER, width=1)

@@ -34,7 +34,16 @@ def market_pair(quotes):
             or q.odds <= 1
         ):
             continue
-        key = (q.source, q.match_id, q.map_number, q.rules, q.gross, q.market_id, q.price_kind)
+        key = (
+            q.source,
+            q.match_id,
+            q.map_number,
+            q.rules,
+            q.gross,
+            q.market_id,
+            q.price_kind,
+            q.price_basis,
+        )
         groups.setdefault(key, {})[q.outcome] = q
     ordered = sorted(groups.items(), key=lambda item: (item[0][0] != "Polymarket", item[0]))
     for key, pair in ordered:

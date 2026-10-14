@@ -95,6 +95,42 @@ async def test_alerts_reply_to_each_original_post_with_cooldown_and_map_limit(
     assert service.store.forecast(identity)["payload"] == before
 
 
+async def test_changing_to_book_reference_does_not_announce_a_fake_price_jump(
+    service, prediction, monkeypatch
+):
+    now = utcnow()
+    monkeypatch.setattr("betbot.service.utcnow", lambda: now)
+    identity, p = published(service, prediction, now)
+    await service.notify_price_increase(
+        identity, p, pair(p, now, 3, price_basis="midpoint_fallback")
+    )
+    service.bot.send_message.assert_not_awaited()
+    now += timedelta(minutes=11)
+    await service.notify_price_increase(
+        identity, p, pair(p, now, 4, price_basis="midpoint_fallback")
+    )
+    service.bot.send_message.assert_awaited_once()
+    assert "3.00 → 4.00" in service.bot.send_message.call_args.args[1]
+    assert "ориентир по стакану" in service.bot.send_message.call_args.args[1]
+
+
+async def test_returning_from_book_reference_rebases_without_comparing_unlike_prices(
+    service, prediction, monkeypatch
+):
+    now = utcnow()
+    monkeypatch.setattr("betbot.service.utcnow", lambda: now)
+    identity, p = published(service, prediction, now)
+    await service.notify_price_increase(
+        identity, p, pair(p, now, 3, price_basis="midpoint_fallback")
+    )
+    await service.notify_price_increase(identity, p, pair(p, now, 2))
+    service.bot.send_message.assert_not_awaited()
+    now += timedelta(minutes=11)
+    await service.notify_price_increase(identity, p, pair(p, now, 2.6))
+    service.bot.send_message.assert_awaited_once()
+    assert "2.00 → 2.60" in service.bot.send_message.call_args.args[1]
+
+
 @pytest.mark.parametrize(
     "mode",
     [
