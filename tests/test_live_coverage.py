@@ -106,6 +106,16 @@ def test_merge_uses_fresh_matching_clock_and_rejects_conflicting_teams(draft):
     assert merge_live_drafts([stale], [steam])[0].source_name == "Steam"
 
 
+def test_missing_steam_map_number_keeps_fresh_matching_source_number(draft):
+    steam = replace(parse_steam_live(steam_game(draft)), map_number=None)
+    top = replace(draft, map_number=3)
+    assert merge_live_drafts([top], [steam])[0].map_number == 3
+    stale = replace(top, source_updated_at=utcnow() - timedelta(hours=1))
+    assert merge_live_drafts([stale], [steam])[0].map_number is None
+    conflict = replace(top, dire_id=999)
+    assert not merge_live_drafts([conflict], [steam])[0].active
+
+
 async def test_steam_league_games_keep_working_when_top_endpoint_fails(draft):
     async def get(url, params):
         if "GetTopLiveGame" in url:

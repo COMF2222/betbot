@@ -59,6 +59,60 @@ async def test_collect_creates_once_and_default_is_preview(service, draft):
     assert service.store.forecast(id_)["state"] == "preview"
 
 
+async def test_unknown_map_waits_then_creates_one_forecast_when_confirmed(service, draft):
+    from betbot.paper_bank import PaperBank
+
+    bank = PaperBank(service.store)
+    bank.start(1, 100000, 10000)
+    service.bot = SimpleNamespace(send_photo=AsyncMock(), send_message=AsyncMock())
+    unknown = replace(draft, map_number=None)
+    assert await service.process_draft(unknown) is None
+    assert service.store.match(draft.match_id)["status"] == "waiting"
+    assert not service.store.forecasts()
+    bank.capture({1})
+    assert not bank.history(1) and not bank.notifications({1})
+    service.bot.send_photo.assert_not_awaited()
+    service.collect_quotes.assert_not_awaited()
+    identity = await service.process_draft(draft)
+    assert identity
+    assert json.loads(service.store.forecast(identity)["payload"])["draft"]["map_number"] == 2
+    assert await service.process_draft(draft) is None
+    assert len(service.store.forecasts()) == 1
+
+
+async def test_legacy_unknown_map_is_confirmed_for_display_without_rewriting_prediction(
+    service, prediction
+):
+    p = replace(prediction, draft=replace(prediction.draft, map_number=None))
+    payload = json.dumps(p.to_dict())
+    service.store.observe(prediction.draft, "observed")
+    displayed = service.saved_prediction(payload)
+    assert displayed.draft.map_number == 2
+    assert displayed.radiant_probability == p.radiant_probability
+    assert displayed.features == p.features and displayed.quotes == p.quotes
+    assert json.loads(payload)["draft"]["map_number"] is None
+    conflict = replace(prediction.draft, dire_id=999)
+    service.store.observe(conflict, "observed")
+    assert service.saved_prediction(payload).draft.map_number is None
+
+
+async def test_confirmed_map_is_retained_if_same_match_source_later_omits_number(service, draft):
+    identity = await service.process_draft(draft)
+    original = service.store.forecast(identity)["payload"]
+    assert await service.process_draft(replace(draft, map_number=None)) is None
+    assert service.store.draft(draft.match_id).map_number == draft.map_number
+    assert service.store.forecast(identity)["payload"] == original
+
+
+async def test_unknown_map_preview_cannot_be_manually_published(service, prediction):
+    p = replace(prediction, draft=replace(prediction.draft, map_number=None))
+    service.store.observe(p.draft, "observed")
+    identity = service.store.add_forecast(p)
+    service.bot = SimpleNamespace(send_photo=AsyncMock())
+    assert "Ожидаем подтверждения" in await service.publish(identity)
+    service.bot.send_photo.assert_not_awaited()
+
+
 async def test_known_league_gets_exact_map_quotes_without_manual_filter(service, draft):
     from betbot.domain import Quote
 

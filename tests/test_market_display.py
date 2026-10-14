@@ -280,14 +280,20 @@ def test_price_basis_classes_do_not_mix_in_market_pairs_or_spike_reports(predict
     assert "наблюдали до" not in text
 
 
-async def test_recovered_token_price_opens_paper_stake_at_publication(tmp_path, prediction):
+@pytest.mark.parametrize("ask,expected", [(None, None), (0.7, "1.43")])
+async def test_token_price_only_opens_paper_stake_with_original_buy_price(
+    tmp_path, prediction, ask, expected
+):
     from betbot.paper_bank import PaperBank
     from betbot.storage import Store
 
     class HTTP:
         async def get(self, url, params):
             if url.endswith("/book"):
-                return {"last_trade_price": "0.04"}
+                return {
+                    "last_trade_price": "0.04",
+                    "asks": [{"price": str(ask), "size": "1000"}] if ask else [],
+                }
             return {
                 "price": "0.68" if params["token_id"] == "radiant-token" else "0.33",
                 "side": "BUY",
@@ -306,9 +312,14 @@ async def test_recovered_token_price_opens_paper_stake_at_publication(tmp_path, 
         store.finish_delivery(delivery, "sent", 1)
         bank.capture({1})
         bet = bank.history(1)[0]
-        assert bet["state"] == "open" and bet["odds"] == "1.47"
-        assert bank.summary(1)["cash_cents"] == 90000
-        assert bank.summary(1)["reserved"] == 10000
+        if expected:
+            assert bet["state"] == "open" and bet["odds"] == expected
+            assert bank.summary(1)["cash_cents"] == 90000
+            assert bank.summary(1)["reserved"] == 10000
+        else:
+            assert bet["state"] == "skipped" and bet["reason"] == "no_initial_buy_price"
+            assert bank.summary(1)["cash_cents"] == 100000
+            assert bank.summary(1)["reserved"] == 0
     finally:
         store.close()
 

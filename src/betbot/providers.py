@@ -252,6 +252,9 @@ def merge_live_drafts(opendota: list[Draft], steam: list[Draft], max_age=180) ->
             if same_teams and same_players and 0 <= age <= max_age and other.active:
                 draft = replace(
                     draft,
+                    map_number=draft.map_number
+                    if draft.map_number is not None
+                    else other.map_number,
                     series_id=other.series_id,
                     patch=other.patch,
                     game_time=other.game_time,

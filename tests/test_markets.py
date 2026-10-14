@@ -159,6 +159,20 @@ def test_ambiguous_events_are_not_bound(draft):
     assert Polymarket.find_event(draft, [event, {**event, "id": "other"}]) is None
 
 
+def test_cloud_rising_market_cannot_be_bound_to_cloud_dawning_even_with_same_opponent(draft):
+    actual = replace(draft, radiant_name="ZENITH", dire_name="Cloud Dawning")
+    wrong = {
+        "teams": [{"name": "Zenith"}, {"name": "Cloud Rising"}],
+        "startTime": draft.observed_at.isoformat(),
+    }
+    right = {
+        "teams": [{"name": "Zenith"}, {"name": "Cloud Dawning"}],
+        "startTime": draft.observed_at.isoformat(),
+    }
+    assert Polymarket.find_event(actual, [wrong]) is None
+    assert Polymarket.find_event(actual, [wrong, right]) == right
+
+
 @pytest.mark.parametrize(
     "league,label,expected",
     [

@@ -88,7 +88,7 @@ def paper_bank(service, owner, identity=None, notice=""):
     summary = PaperBank(service.store).summary(owner, identity)
     if not summary:
         return panel(
-            "💰 <b>Виртуальный банк</b>\n\nЗадайте начальный баланс и одинаковую сумму ставки на каждый новый опубликованный прогноз. Бот посчитает результат по первому кэфу Polymarket из исходной карточки.\n\nБаланс и сообщения доступны только вам в личном чате. Это учебный расчёт без комиссий.",
+            "💰 <b>Виртуальный банк</b>\n\nЗадайте начальный баланс и одинаковую сумму ставки на каждый новый опубликованный прогноз. Бот посчитает результат по цене покупки Polymarket, сохранённой при прогнозе.\n\nБаланс и сообщения доступны только вам в личном чате. Это учебный расчёт без комиссий и проверки объёма исполнения.",
             [[button("＋ Задать баланс и ставку", "ui:paper-new")]],
             "ui:home",
         )
@@ -97,7 +97,7 @@ def paper_bank(service, owner, identity=None, notice=""):
     text = f"💰 <b>Виртуальный банк #{summary['id']}</b>\n\nБаланс: <b>{money(summary['equity'])}</b>\nСвободно: <b>{money(summary['cash_cents'])}</b>\nВ открытых ставках: {money(summary['reserved'])}\nСтарт: {money(summary['initial_cents'])} · ставка {money(summary['stake_cents'])}\n\nПрибыль: <b>{'+' if profit > 0 else ''}{money(profit)}</b>\n✅ {counts.get('won', 0)} · ❌ {counts.get('lost', 0)} · ⏳ {counts.get('open', 0)} · пропущено {counts.get('skipped', 0)}"
     if summary["turnover"]:
         text += f"\nДоходность по рассчитанным ставкам: {profit / summary['turnover']:+.1%}"
-    text += "\n\nПервый кэф из прогноза фиксируется навсегда. Без исходного кэфа или при нехватке денег карта пропускается. Суммы — виртуальные единицы."
+    text += "\n\nНовые ставки — по цене покупки из первого снимка, без подстановки ориентира. Старые ставки сохранены. Без цены покупки или при нехватке денег карта пропускается. Суммы — виртуальные единицы; комиссии и объём исполнения не учитываются."
     if notice:
         text += "\n\n" + esc(notice, 250)
     closed = bool(summary["closed_at"])

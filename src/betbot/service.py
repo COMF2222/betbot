@@ -621,6 +621,8 @@ class Service:
         if not self.store.enabled(draft.league_id):
             return None
         draft = draft.with_team_aliases(self.store.get("team_aliases", {}))
+        if draft.map_number is None:
+            draft = draft.with_confirmed_map(self.store.draft(draft.match_id))
         map_number = self.store.get(f"map:{draft.match_id}", draft.map_number)
 
         def profiles(players):
@@ -652,6 +654,9 @@ class Service:
             or self.store.has_forecast(draft.match_id)
             or self.store.match(draft.match_id)["result"]
         ):
+            return None
+        if not draft.map_number:
+            self.store.mark(draft.match_id, "waiting", "Ожидаем подтверждения номера карты")
             return None
         if late and self.steam:
             try:
@@ -725,6 +730,10 @@ class Service:
 
     def saved_prediction(self, payload: str) -> Prediction:
         p = Prediction.from_dict(json.loads(payload))
+        # An old forecast may predate map-number confirmation. Only fill identity
+        # metadata from the exact same match and roster; never recompute its score.
+        if not p.draft.map_number:
+            p.draft = p.draft.with_confirmed_map(self.store.draft(p.draft.match_id))
         if not p.league_name:
             p.league_name = next(
                 (r["name"] for r in self.store.leagues() if r["id"] == p.draft.league_id), ""
@@ -775,6 +784,8 @@ class Service:
         if row["result"]:
             return "Карта уже завершена. Запоздалый прогноз не публикуется."
         p = self.saved_prediction(row["payload"])
+        if not p.draft.map_number:
+            return "Ожидаем подтверждения номера карты. Прогноз пока не публикуется."
         if not self.store.enabled(p.draft.league_id):
             return "Турнир выключен."
         if not self.model.publication_ready or not p.publication_ready:

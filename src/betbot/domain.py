@@ -59,6 +59,26 @@ class Draft:
                 names[f"{side}_name"] = alias.strip()
         return replace(self, **names) if names else self
 
+    def with_confirmed_map(self, other: "Draft | None") -> "Draft":
+        if self.map_number is not None or not other or not other.map_number or not other.active:
+            return self
+        same_identity = (self.match_id, self.league_id, self.radiant_id, self.dire_id) == (
+            other.match_id,
+            other.league_id,
+            other.radiant_id,
+            other.dire_id,
+        )
+        same_roster = all(
+            {(p.account_id, p.hero_id) for p in getattr(self, side)}
+            == {(p.account_id, p.hero_id) for p in getattr(other, side)}
+            for side in ("radiant", "dire")
+        )
+        return (
+            replace(self, map_number=other.map_number)
+            if same_identity and same_roster and self.complete
+            else self
+        )
+
     @property
     def complete(self) -> bool:
         heroes = [p.hero_id for p in self.radiant + self.dire]

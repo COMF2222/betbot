@@ -41,7 +41,7 @@ def forecast(store, prediction, suffix="1", odds=1.79, destinations=(-100, -200)
                 p.draft.map_number,
                 price_kind="market",
                 gross=True,
-                **quote_changes,
+                **{"ask_odds": odds, **quote_changes},
             )
         ]
     )
@@ -122,16 +122,28 @@ def test_missing_map_reason_is_frozen_with_forecast_not_later_source_status(ledg
     assert ledger.forecast(identity)["payload"] == json.dumps(p.to_dict(), ensure_ascii=False)
 
 
-def test_midpoint_reference_is_fixed_and_marked_in_private_bank(ledger, prediction):
+def test_bank_uses_first_buy_price_instead_of_more_optimistic_book_reference(ledger, prediction):
     bank = PaperBank(ledger)
     bank.start(1, 100000, 10000)
-    _, p = forecast(ledger, prediction, odds=1.18343195266, price_basis="midpoint_fallback")
+    _, p = forecast(ledger, prediction, odds=1.83, ask_odds=1.03, price_basis="midpoint_fallback")
     bank.capture({1})
-    assert bank.history(1)[0]["odds"] == "1.18"
-    assert "ориентир по стакану" in notification_text(bank.notifications({1})[0])
+    assert bank.history(1)[0]["odds"] == "1.03"
+    assert "кэф покупки" in notification_text(bank.notifications({1})[0])
+    assert "ориентир по стакану" not in notification_text(bank.notifications({1})[0])
+    ledger.save_quotes(p.draft.match_id, [replace(p.quotes[0], ask_odds=3.0)])
     ledger.result(p.draft.match_id, {"radiant_win": p.favorite == "radiant"})
     bank.settle({1})
-    assert bank.summary(1)["profit"] == 1800
+    assert bank.summary(1)["profit"] == 300
+
+
+@pytest.mark.parametrize("ask", [None, float("nan"), float("inf"), 1, 0, 2_000_000])
+def test_missing_or_invalid_buy_price_never_falls_back_to_market_reference(ledger, prediction, ask):
+    bank = PaperBank(ledger)
+    bank.start(1, 100000, 10000)
+    forecast(ledger, prediction, ask_odds=ask)
+    bank.capture({1})
+    assert bank.history(1)[0]["reason"] == "no_initial_buy_price"
+    assert bank.summary(1)["cash_cents"] == 100000
 
 
 @pytest.mark.parametrize(

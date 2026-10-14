@@ -1,6 +1,7 @@
 """Private, virtual flat-stake accounts. No execution or wallet integrations."""
 
 import json
+import math
 import re
 from dataclasses import replace
 from datetime import timedelta
@@ -13,6 +14,7 @@ from .presentation import esc, market_snapshot, tournament_line
 SKIPS = {
     **MARKET_ISSUES,
     "no_initial_odds": "при публикации прогноза не удалось получить кэф на эту карту",
+    "no_initial_buy_price": "в исходном прогнозе нет доступной цены покупки этой команды",
     "already_finished": "результат уже известен, новую ставку не открываем",
     "insufficient": "не хватает свободного баланса",
 }
@@ -33,7 +35,7 @@ def money(cents):
 
 
 def initial_quote(prediction, created_at, max_age=30):
-    """Exactly the displayed first market price, never a later attached quote."""
+    """Buy-side price from the first saved snapshot, never a midpoint or later read."""
     if not prediction.draft.map_number or not created_at:
         return None
     valid = [
@@ -52,7 +54,15 @@ def initial_quote(prediction, created_at, max_age=30):
         and q.fresh(created_at, max_age)
     ]
     own, _, _ = market_snapshot(replace(prediction, quotes=valid), None)
-    return own if own and Decimal(f"{own.odds:.2f}") > 1 else None
+    if (
+        not own
+        or own.ask_odds is None
+        or not math.isfinite(own.ask_odds)
+        or not 1 < own.ask_odds <= 1_000_000
+        or Decimal(f"{own.ask_odds:.2f}") <= 1
+    ):
+        return None
+    return replace(own, odds=own.ask_odds, price_basis="buy_ask", price_kind="offer")
 
 
 class PaperBank:
@@ -184,6 +194,8 @@ class PaperBank:
                 issue = p.analysis.get("market_status", {}).get("code")
                 if reason == "no_initial_odds" and issue in MARKET_ISSUES:
                     reason = issue
+                elif reason == "no_initial_odds" and p.quotes:
+                    reason = "no_initial_buy_price"
                 current = self.session(session["owner_id"])
                 if not current or current["id"] != session["id"] or not current["active"]:
                     break
@@ -313,15 +325,18 @@ def notification_text(row, aliases=None):
     balance = json.loads(row["payload"])
     title = f"💰 <b>Виртуальный банк #{row['session_id']}</b>"
     match = f"{esc(p.favorite_name, 50)} · карта {p.draft.map_number or '?'}"
+    price_label = (
+        "кэф покупки" if (snapshot.get("quote") or {}).get("price_basis") == "buy_ask" else "кэф"
+    )
     if row["kind"] == "open":
         body = (
             f"⏭ Пропуск: {match}\n{SKIPS[row['reason']]}"
             if row["reason"]
-            else f"📝 {match}\nСтавка: <b>{money(row['stake_cents'])}</b> · первый кэф <b>{row['odds']}</b>"
+            else f"📝 {match}\nСтавка: <b>{money(row['stake_cents'])}</b> · {price_label} <b>{row['odds']}</b>"
         )
     else:
         profit = row["payout_cents"] - row["stake_cents"]
-        body = f"{'✅ Зашло' if row['bet_state'] == 'won' else '❌ Мимо'}: {match}\nИтог ставки: <b>{'+' if profit > 0 else ''}{money(profit)}</b> · кэф {row['odds']}"
+        body = f"{'✅ Зашло' if row['bet_state'] == 'won' else '❌ Мимо'}: {match}\nИтог ставки: <b>{'+' if profit > 0 else ''}{money(profit)}</b> · {price_label} {row['odds']}"
     if (snapshot.get("quote") or {}).get("price_basis") == "midpoint_fallback":
         body += " · ориентир по стакану"
     return "\n".join(
