@@ -86,9 +86,16 @@ def paper_bank(service, owner, identity=None, notice=""):
     from .paper_bank import PaperBank, money
 
     summary = PaperBank(service.store).summary(owner, identity)
+    pricing = (
+        "Приоритет — цена покупки Polymarket. Если её нет, берём заранее сохранённую линию Fonbet. Для Fonbet это расчёт по предматчевому кэфу, который мог измениться к драфту."
+        if service.odds
+        else "Новые ставки — по цене покупки Polymarket из первого снимка, без подстановки ориентира."
+    )
     if not summary:
         return panel(
-            "💰 <b>Виртуальный банк</b>\n\nЗадайте начальный баланс и одинаковую сумму ставки на каждый новый опубликованный прогноз. Бот посчитает результат по цене покупки Polymarket, сохранённой при прогнозе.\n\nБаланс и сообщения доступны только вам в личном чате. Это учебный расчёт без комиссий и проверки объёма исполнения.",
+            "💰 <b>Виртуальный банк</b>\n\nЗадайте начальный баланс и одинаковую сумму ставки на каждый новый опубликованный прогноз. "
+            + pricing
+            + "\n\nБаланс и сообщения доступны только вам в личном чате. Это учебный расчёт без комиссий и проверки объёма исполнения.",
             [[button("＋ Задать баланс и ставку", "ui:paper-new")]],
             "ui:home",
         )
@@ -97,7 +104,11 @@ def paper_bank(service, owner, identity=None, notice=""):
     text = f"💰 <b>Виртуальный банк #{summary['id']}</b>\n\nБаланс: <b>{money(summary['equity'])}</b>\nСвободно: <b>{money(summary['cash_cents'])}</b>\nВ открытых ставках: {money(summary['reserved'])}\nСтарт: {money(summary['initial_cents'])} · ставка {money(summary['stake_cents'])}\n\nПрибыль: <b>{'+' if profit > 0 else ''}{money(profit)}</b>\n✅ {counts.get('won', 0)} · ❌ {counts.get('lost', 0)} · ⏳ {counts.get('open', 0)} · пропущено {counts.get('skipped', 0)}"
     if summary["turnover"]:
         text += f"\nДоходность по рассчитанным ставкам: {profit / summary['turnover']:+.1%}"
-    text += "\n\nНовые ставки — по цене покупки из первого снимка, без подстановки ориентира. Старые ставки сохранены. Без цены покупки или при нехватке денег карта пропускается. Суммы — виртуальные единицы; комиссии и объём исполнения не учитываются."
+    text += (
+        "\n\n"
+        + pricing
+        + " Старые ставки сохранены. Без исходной цены или при нехватке денег карта пропускается. Суммы — виртуальные единицы; комиссии и объём исполнения не учитываются."
+    )
     if notice:
         text += "\n\n" + esc(notice, 250)
     closed = bool(summary["closed_at"])
@@ -458,6 +469,48 @@ def threshold(service):
 
 def sources(service):
     active = service.store.get("source:Polymarket", True)
+    if service.odds:
+        account = service.store.get("fonbet:account", {})
+        meter = service.store.get("fonbet:meter", {})
+        snapshots = service.store.get("fonbet:snapshots", {})
+        enabled = service.store.get("source:Fonbet", True)
+        if service.fonbet and account.get("key_tag") != service.fonbet.key_tag:
+            account = {}
+        text = (
+            "💱 <b>Источники котировок</b>\n\n"
+            f"<b>Fonbet</b> · {'включён' if enabled else 'выключен'}\n"
+            "Запасной исходный кэф, когда Polymarket недоступен: сохранённая линия на нужную карту и команду. Сбор заранее, повторная попытка за 5 минут до начала серии.\n"
+            f"В кэше: {len(snapshots)} матчей · {sum(len(s.get('maps', {})) for s in snapshots.values())} рынков карт.\n"
+        )
+        if account:
+            text += f"Ключ: {'принят' if account.get('authenticated') else 'не подтверждён'} · осталось {account.get('remaining', '?')} из {account.get('request_limit', '?')} запросов.\n"
+            today = utcnow().astimezone(MOSCOW).date().isoformat()
+            used = (
+                meter.get("used", 0)
+                if meter.get("day") == today and meter.get("key_tag") == account.get("key_tag")
+                else 0
+            )
+            text += f"Сегодня бот использовал {used} из {service.settings.oddspapi_daily_request_limit}.\n"
+            if not account.get("fonbet_live"):
+                text += "Тариф даёт предматчевую линию; live Fonbet недоступен.\n"
+        else:
+            text += "Проверка ключа ещё не завершена.\n"
+        text += f"\n<b>Polymarket</b> · {'включён' if active else 'выключен'}\nОсновной исходный кэф. Движение цены и уведомления во время карты также берём отсюда. Изменения считаются между котировками Polymarket."
+        return panel(
+            text,
+            [
+                [button("Выключить Fonbet" if enabled else "Включить Fonbet", "ui:source:Fonbet")],
+                [
+                    button(
+                        "Выключить Polymarket" if active else "Включить Polymarket",
+                        "ui:source:Polymarket",
+                    )
+                ],
+                [button("↻ Обновить состояние", "ui:sources")],
+                [button("🔗 Привязка Polymarket", "ui:market-help")],
+            ],
+            "ui:home",
+        )
     text = (
         f"💱 <b>Источники котировок</b>\n\n<b>Polymarket</b> · {'включён' if active else 'выключен'}\nКэф — 1 / отображаемая цена рынка для конкретной карты. Цена покупки хранится отдельно; история рынка дополняет снимки во время игры.\n\n<b>1win · BetBoom · Winline · PARI</b>\n"
         + (

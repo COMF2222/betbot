@@ -336,11 +336,22 @@ def forecast_image(p, heroes=None, assets=None, demo=False):
             and quote.odds > 1
         ):
             groups.setdefault(quote.source, {})[quote.outcome] = quote
-    source = "Polymarket" if "Polymarket" in groups else next(iter(groups), None)
+    preferred = p.analysis.get("initial_odds_source")
+    source = (
+        preferred
+        if preferred in groups
+        else None
+        if preferred
+        else "Polymarket"
+        if "Polymarket" in groups
+        else next(iter(groups), None)
+    )
     if source:
         quotes = groups[source]
         quote_time = max(quote.observed_at for quote in quotes.values())
         label = "В момент прогноза"
+        if source == "Fonbet":
+            label = ""
         if (quote_time - p.draft.observed_at).total_seconds() > 30:
             label = f"На {quote_time.astimezone(MOSCOW):%H:%M} МСК · позже прогноза"
         if any(q.price_basis == "midpoint_fallback" for q in quotes.values()):

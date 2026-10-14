@@ -90,7 +90,12 @@ def entries_from_rows(rows, late_analysis=False, aliases=None):
             [
                 q
                 for q in p.quotes
-                if q.match_id == p.draft.match_id and q.map_number == p.draft.map_number
+                if q.match_id == p.draft.match_id
+                and q.map_number == p.draft.map_number
+                and (
+                    not p.analysis.get("initial_odds_source")
+                    or q.source == p.analysis["initial_odds_source"]
+                )
             ]
         )
         map_label = (

@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     oddspapi_api_key: str = ""
     oddspapi_base_url: str = "https://api.oddspapi.io/v4"
     the_odds_api_key: str = ""
+    oddspapi_daily_request_limit: int = 8
+    oddspapi_prefetch_seconds: int = 86400
     odds_feed_url: str = ""
     odds_feed_api_key: str = ""
 
@@ -56,6 +58,8 @@ class Settings(BaseSettings):
         "telegram_request_timeout_seconds",
         "odds_alert_cooldown_seconds",
         "odds_alert_max_per_map",
+        "oddspapi_daily_request_limit",
+        "oddspapi_prefetch_seconds",
     )
     @classmethod
     def positive(cls, value: int) -> int:

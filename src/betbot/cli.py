@@ -198,17 +198,14 @@ async def doctor(settings: Settings, check_bookmakers: bool):
         await asyncio.gather(check_dota(), check_poly(), check_telegram())
         if settings.oddspapi_api_key:
             try:
-                books = await OddsPapi(
+                account = await OddsPapi(
                     http, settings.oddspapi_api_key, settings.oddspapi_base_url
-                ).bookmakers()
+                ).account()
                 results["sources"]["OddsPapi"] = {
                     "ok": True,
-                    "bookmakers": len(books),
-                    "note": "Каталог доступен; конкретные рынки, бренды и свежесть ещё требуют привязки и проверки",
+                    **account,
+                    "note": "Fonbet: предматчевые снимки; движение во время карты — Polymarket. Каталог рынков собирается worker с учётом квоты.",
                 }
-                (settings.data_dir / "bookmakers.json").write_text(
-                    json.dumps(books, ensure_ascii=False, indent=2), encoding="utf-8"
-                )
             except Exception as exc:
                 results["sources"]["OddsPapi"] = {"ok": False, "error": str(exc)}
         if settings.the_odds_api_key:
@@ -223,6 +220,7 @@ async def doctor(settings: Settings, check_bookmakers: bool):
             "BetBoom": "https://betboom.ru",
             "Winline": "https://winline.ru",
             "PARI": "https://pari.ru",
+            "Fonbet": "https://fonbet.com",
         }
         for book in BOOKMAKERS:
             row = {

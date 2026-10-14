@@ -1,6 +1,7 @@
 import html
 import math
 import re
+from dataclasses import replace
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -9,6 +10,8 @@ from zoneinfo import ZoneInfo
 from PIL import ImageFont
 
 from .domain import Prediction, Quote, best_quotes, timestamp, utcnow
+from .fonbet import ISSUES as FONBET_ISSUES
+from .fonbet import valid_reference
 from .market_status import MARKET_ISSUES, market_context_note
 from .timing import timing_note
 
@@ -81,6 +84,7 @@ def short_reasons(p: Prediction, heroes: dict | None = None) -> str:
 def market_snapshot(p: Prediction, max_age=None, now=None):
     from .reports import market_pair
 
+    preferred = p.analysis.get("initial_odds_source")
     quotes = [
         q
         for q in p.quotes
@@ -90,7 +94,9 @@ def market_snapshot(p: Prediction, max_age=None, now=None):
         and q.active
         and math.isfinite(q.odds)
         and q.odds > 1
-        and (max_age is None or q.fresh(now or utcnow(), max_age))
+        and (not preferred or q.source == preferred)
+        and (q.price_origin != "prematch" or valid_reference(q, p.draft))
+        and (max_age is None or q.fresh(now or utcnow(), max_age) or valid_reference(q, p.draft))
     ]
     pair = market_pair(quotes)
     opponent = "dire" if p.favorite == "radiant" else "radiant"
@@ -124,7 +130,7 @@ def caption(p: Prediction, max_age: int = 30, heroes=None, now=None) -> str:
         )
     own, other, probability = market_snapshot(p, max_age, now)
     if own:
-        label = "Рынок"
+        label = "Fonbet" if own.source == "Fonbet" else "Рынок"
         if (own.observed_at - p.draft.observed_at).total_seconds() > 30:
             label += f" на {own.observed_at.astimezone(MOSCOW):%H:%M}"
         line = f"{label}: {esc(p.favorite_name, 45)} <b>{own.odds:.2f}</b> ({probability:.0%})"
@@ -136,8 +142,14 @@ def caption(p: Prediction, max_age: int = 30, heroes=None, now=None) -> str:
             line += " · " + context_note
         info.append(line)
     else:
-        issue = p.analysis.get("market_status", {}).get("code")
-        info.append("Рынок: " + MARKET_ISSUES.get(issue, "кэф на эту карту пока недоступен") + ".")
+        if p.analysis.get("initial_odds_source") == "Fonbet":
+            issue = p.analysis.get("fonbet_status", {}).get("code")
+            info.append("Fonbet: " + FONBET_ISSUES.get(issue, "кэф на эту карту не сохранён") + ".")
+        else:
+            issue = p.analysis.get("market_status", {}).get("code")
+            info.append(
+                "Рынок: " + MARKET_ISSUES.get(issue, "кэф на эту карту пока недоступен") + "."
+            )
     lines.append("ℹ️ " + " ".join(info))
     if note := timing_note(p):
         lines.append("⏱ " + note)
@@ -228,6 +240,8 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
     signal = f"{p.favorite_probability:.0%}, {stars(p.favorite_probability)}"
     own, _, market_probability = market_snapshot(p)
     price = f", кэф {own.odds:.2f}" if own else ""
+    if own and own.source == "Fonbet":
+        price = f", Fonbet {own.odds:.2f}"
     if context_note := market_context_note(own):
         price += f" ({context_note})"
     if own and own.price_basis == "midpoint_fallback":
@@ -248,10 +262,32 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
         else None
     )
     observations = []
-    if own and finish:
+    tracking = own
+    if p.analysis.get("initial_odds_source") == "Fonbet":
+        tracking, _, _ = market_snapshot(
+            replace(p, analysis={**p.analysis, "initial_odds_source": "Polymarket"})
+        )
+        if not tracking and finish:
+            for snapshot in sorted(snapshots or [], key=lambda s: s.get("observed_at", "")):
+                when = timestamp(snapshot.get("observed_at"))
+                if not when or not max(start, p.draft.observed_at) <= when <= finish:
+                    continue
+                # First actual Polymarket read is a tracking baseline, never an initial bet price.
+                current = replace(
+                    p,
+                    quotes=[Quote.from_dict(q) for q in snapshot.get("quotes", [])],
+                    analysis={**p.analysis, "initial_odds_source": "Polymarket"},
+                )
+                tracking, _, _ = market_snapshot(current, 30, when)
+                if tracking:
+                    break
+    if tracking and finish:
         for snapshot in snapshots or []:
             when = timestamp(snapshot.get("observed_at"))
-            if not when or not max(start, p.draft.observed_at, own.observed_at) <= when <= finish:
+            if (
+                not when
+                or not max(start, p.draft.observed_at, tracking.observed_at) <= when <= finish
+            ):
                 continue
             for raw in snapshot.get("quotes", []):
                 q = Quote.from_dict(raw)
@@ -268,25 +304,28 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
                         q.market_basis,
                     )
                     != (
-                        own.source,
-                        own.match_id,
-                        own.map_number,
-                        own.market,
-                        own.rules,
-                        own.gross,
-                        own.market_id,
-                        own.price_basis,
-                        own.market_basis,
+                        tracking.source,
+                        tracking.match_id,
+                        tracking.map_number,
+                        tracking.market,
+                        tracking.rules,
+                        tracking.gross,
+                        tracking.market_id,
+                        tracking.price_basis,
+                        tracking.market_basis,
                     )
-                    or q.price_kind != own.price_kind
+                    or q.price_kind != tracking.price_kind
                     or not q.fresh(when, 30)
                 ):
                     continue
                 observations.append(q)
     if win and observations:
-        peak = max((q.odds for q in observations if q.outcome == p.favorite), default=own.odds)
-        if peak > own.odds + 0.01:
-            lines[0] += f", наблюдали до {peak:.2f}"
+        peak = max((q.odds for q in observations if q.outcome == p.favorite), default=tracking.odds)
+        if peak > tracking.odds + 0.01:
+            if p.analysis.get("initial_odds_source") == "Fonbet":
+                lines.append(f"📈 Polymarket: {tracking.odds:.2f} → наблюдали до {peak:.2f}")
+            else:
+                lines[0] += f", наблюдали до {peak:.2f}"
     elif not win:
         winner_side = "radiant" if radiant_win else "dire"
         comeback = max(
@@ -302,7 +341,7 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
             expected = p.favorite_name if market_probability >= 0.5 else winner
             probability = max(market_probability, 1 - market_probability)
             lines.append(
-                f"ℹ️ Рынок {'тоже ' if market_probability >= 0.5 else ''}ждал {esc(expected, 45)} ({probability:.0%})"
+                f"ℹ️ {'Fonbet' if p.analysis.get('initial_odds_source') == 'Fonbet' else 'Рынок'} {'тоже ' if market_probability >= 0.5 else ''}ждал {esc(expected, 45)} ({probability:.0%})"
             )
     if note := timing_note(p):
         lines.append("⏱ " + note)

@@ -12,7 +12,7 @@ import httpx
 from .domain import Draft, Player, Quote, timestamp, utcnow
 from .timing import draft_timing
 
-BOOKMAKERS = ("1win", "BetBoom", "Winline", "PARI")
+BOOKMAKERS = ("1win", "BetBoom", "Winline", "PARI", "Fonbet")
 
 
 class ProviderError(Exception):
@@ -33,15 +33,17 @@ class HTTP:
     async def close(self):
         await self.client.aclose()
 
-    async def get(self, url: str, params: dict | None = None, headers: dict | None = None):
-        for attempt in range(3):
+    async def get(
+        self, url: str, params: dict | None = None, headers: dict | None = None, attempts: int = 3
+    ):
+        for attempt in range(attempts):
             if "api.opendota.com" in url:
                 async with self._odota_lock:
                     await asyncio.sleep(max(0, 1.1 - (time.monotonic() - self._last_odota)))
                     self._last_odota = time.monotonic()
             try:
                 response = await self.client.get(url, params=params, headers=headers)
-                if response.status_code in (429, 502, 503, 504) and attempt < 2:
+                if response.status_code in (429, 502, 503, 504) and attempt < attempts - 1:
                     await asyncio.sleep(2 ** (attempt + 1))
                     continue
                 response.raise_for_status()
@@ -51,7 +53,7 @@ class HTTP:
                     f"HTTP {exc.response.status_code}: {exc.request.url.host}"
                 ) from None
             except (httpx.RequestError, ValueError):
-                if attempt == 2:
+                if attempt == attempts - 1:
                     raise ProviderError(f"Недоступен источник {httpx.URL(url).host}") from None
                 await asyncio.sleep(2 ** (attempt + 1))
         raise ProviderError("Источник не ответил")
@@ -807,9 +809,43 @@ class OddsPapi:
 
     def __init__(self, http: HTTP, key: str, base: str):
         self.http, self.key, self.base = http, key, base.rstrip("/")
+        self._request_lock = asyncio.Lock()
+        self._last_request = 0.0
+
+    async def request(self, endpoint: str, params=None):
+        # Errors are billable too. The quota-aware caller decides when to try again.
+        async with self._request_lock:
+            await asyncio.sleep(max(0, 2.1 - (time.monotonic() - self._last_request)))
+            self._last_request = time.monotonic()
+            return await self.http.get(
+                self.base + "/" + endpoint,
+                {"apiKey": self.key, **(params or {})},
+                attempts=1,
+            )
+
+    async def account(self) -> dict:
+        raw = await self.request("account")
+        active = [s for s in raw.get("subscriptions", []) if s.get("is_active")]
+        current = next(
+            (s for s in active if s.get("subscription_id") == raw.get("current_subscription_id")),
+            active[0] if len(active) == 1 else {},
+        )
+        books = current.get("bookmakers") or {}
+        limit, used = current.get("request_limit"), current.get("request_count")
+        return {
+            "authenticated": True,
+            "dota_allowed": 16 in current.get("sport_ids", []),
+            "fonbet_allowed": "fonbet" in books,
+            "fonbet_live": bool(books.get("fonbet", {}).get("has_live_odds")),
+            "request_limit": limit,
+            "request_count": used,
+            "remaining": max(0, limit - used)
+            if isinstance(limit, int) and isinstance(used, int)
+            else None,
+        }
 
     async def bookmakers(self) -> list[dict]:
-        result = await self.http.get(self.base + "/bookmakers", {"apiKey": self.key})
+        result = await self.request("bookmakers")
         return result if isinstance(result, list) else result.get("bookmakers", [])
 
     async def quotes(self, draft: Draft, bindings: list[dict]) -> list[Quote]:

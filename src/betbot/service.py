@@ -20,6 +20,7 @@ from aiogram.types import (
 
 from .config import Settings
 from .domain import Draft, Prediction, timestamp, utcnow
+from .fonbet import FonbetPrematch, valid_reference
 from .leagues import activity_snapshot, calendar_events
 from .market_status import MARKET_ISSUES
 from .model import History, Model
@@ -77,6 +78,16 @@ class Service:
         self.odds = (
             OddsPapi(self.http, settings.oddspapi_api_key, settings.oddspapi_base_url)
             if settings.oddspapi_api_key
+            else None
+        )
+        self.fonbet = (
+            FonbetPrematch(
+                self.odds,
+                store,
+                settings.oddspapi_daily_request_limit,
+                settings.oddspapi_prefetch_seconds,
+            )
+            if self.odds
             else None
         )
         self.model = Model(settings.model_path)
@@ -515,7 +526,7 @@ class Service:
                 # A missing portrait is displayed as a hero ID; it doesn't change predictions.
                 pass
 
-    async def collect_quotes(self, draft: Draft) -> list:
+    async def collect_quotes(self, draft: Draft, include_fonbet=True) -> list:
         quotes = []
         status = {"code": "market_disabled", "map_number": draft.map_number, "event_id": None}
         if self.store.get("source:Polymarket", True):
@@ -555,26 +566,46 @@ class Service:
         self.store.set(
             f"market_status:{draft.match_id}", {**status, "checked_at": utcnow().isoformat()}
         )
-        if self.feed:
+        if self.feed and not self.fonbet:
             try:
                 quotes.extend(await self.feed.quotes(draft))
                 self.store.health("Odds feed", True, "Источник ответил")
             except Exception as exc:
                 self.store.health("Odds feed", False, str(exc))
-        if self.odds:
-            try:
-                quotes.extend(
-                    await self.odds.quotes(draft, self.store.get(f"odds:{draft.match_id}", []))
-                )
-                self.store.health("OddsPapi", True, "Проверены настроенные привязки")
-            except Exception as exc:
-                self.store.health("OddsPapi", False, str(exc))
+        if include_fonbet and self.fonbet:
+            if self.store.get("source:Fonbet", True):
+                names = self.fonbet_league_names(draft.league_id)
+                saved, issue = self.fonbet.quotes(draft, names)
+                quotes.extend(saved)
+            else:
+                issue = "fonbet_disabled"
+            self.store.set(
+                f"fonbet_status:{draft.match_id}",
+                {"code": issue, "checked_at": utcnow().isoformat()},
+            )
         return [
             q
             for q in quotes
             if self.store.get(f"source:{q.source}", True)
-            and q.fresh(utcnow(), self.settings.quote_max_age_seconds)
+            and (
+                q.fresh(utcnow(), self.settings.quote_max_age_seconds) or valid_reference(q, draft)
+            )
         ]
+
+    def fonbet_league_names(self, league_id=None):
+        selected = [
+            r["name"]
+            for r in self.store.leagues(league_id is None)
+            if league_id is None or r["id"] == league_id
+        ]
+        selected += [
+            keyword
+            for event in self.calendar
+            if (league_id is None and self.store.enabled(event["league_id"]))
+            or event["league_id"] == league_id
+            for keyword in event.get("market_keywords", [])
+        ]
+        return sorted(set(selected))
 
     def market_keywords(self, league_id, moment=None):
         override = self.store.get(f"poly_league:{league_id}")
@@ -695,9 +726,14 @@ class Service:
             self.store.mark(draft.match_id, "skipped", "нет достаточно выраженного фаворита")
             return None
         p.quotes = await self.collect_quotes(draft)
+        from .paper_bank import initial_source
+
+        selected_source = initial_source(p, utcnow(), self.settings.quote_max_age_seconds)
         p.analysis = {
             **p.analysis,
             "market_status": self.store.get(f"market_status:{draft.match_id}", {}),
+            "initial_odds_source": selected_source,
+            "fonbet_status": self.store.get(f"fonbet_status:{draft.match_id}", {}),
         }
         p.league_name = next(
             (r["name"] for r in self.store.leagues() if r["id"] == draft.league_id), ""
@@ -987,7 +1023,7 @@ class Service:
                 p.draft.map_number
                 and 0 <= (utcnow() - p.draft.observed_at).total_seconds() <= 6 * 3600
             ):
-                quotes = await self.collect_quotes(p.draft)
+                quotes = await self.collect_quotes(p.draft, include_fonbet=False)
                 self.store.save_quotes(p.draft.match_id, quotes)
                 if not p.quotes and quotes:
                     await self.attach_missing_quotes(row["id"], p, quotes)
@@ -1348,6 +1384,8 @@ class Service:
             self.start_tournament_refresh()
             self.model.reload()
             await self.refresh_league_activity()
+            if self.fonbet and self.store.get("source:Fonbet", True):
+                await self.fonbet.refresh(self.fonbet_league_names())
             if self.store.leagues(enabled_only=True):
                 try:
                     drafts = await self.live_drafts()

@@ -8,11 +8,14 @@ from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from .domain import Prediction, Quote, timestamp, utcnow
+from .fonbet import ISSUES as FONBET_ISSUES
+from .fonbet import valid_reference
 from .market_status import MARKET_ISSUES, market_context_note
 from .presentation import esc, market_snapshot, tournament_line
 
 SKIPS = {
     **MARKET_ISSUES,
+    **FONBET_ISSUES,
     "no_initial_odds": "при публикации прогноза не удалось получить кэф на эту карту",
     "no_initial_buy_price": "в исходном прогнозе нет доступной цены покупки этой команды",
     "already_finished": "результат уже известен, новую ставку не открываем",
@@ -38,6 +41,14 @@ def initial_quote(prediction, created_at, max_age=30):
     """Buy-side price from the first saved snapshot, never a midpoint or later read."""
     if not prediction.draft.map_number or not created_at:
         return None
+    if prediction.analysis.get("initial_odds_source") == "Fonbet":
+        quotes = [
+            q
+            for q in prediction.quotes
+            if q.observed_at <= created_at and valid_reference(q, prediction.draft)
+        ]
+        own, other, _ = market_snapshot(replace(prediction, quotes=quotes), None)
+        return own if own and other and Decimal(f"{own.odds:.2f}") > 1 else None
     valid = [
         q
         for q in prediction.quotes
@@ -63,6 +74,17 @@ def initial_quote(prediction, created_at, max_age=30):
     ):
         return None
     return replace(own, odds=own.ask_odds, price_basis="buy_ask", price_kind="offer")
+
+
+def initial_source(prediction, created_at, max_age=30):
+    """Freeze source selection once: executable Polymarket, then the Fonbet benchmark."""
+    for source in ("Polymarket", "Fonbet"):
+        selected = replace(
+            prediction, analysis={**prediction.analysis, "initial_odds_source": source}
+        )
+        if initial_quote(selected, created_at, max_age):
+            return source
+    return "Polymarket"
 
 
 class PaperBank:
@@ -192,7 +214,13 @@ class PaperBank:
                     "already_finished" if row["result"] else "no_initial_odds" if not quote else ""
                 )
                 issue = p.analysis.get("market_status", {}).get("code")
-                if reason == "no_initial_odds" and issue in MARKET_ISSUES:
+                fonbet_issue = p.analysis.get("fonbet_status", {}).get("code", "fonbet_unmatched")
+                if (
+                    reason == "no_initial_odds"
+                    and p.analysis.get("initial_odds_source") == "Fonbet"
+                ):
+                    reason = fonbet_issue if fonbet_issue in FONBET_ISSUES else "fonbet_unmatched"
+                elif reason == "no_initial_odds" and issue in MARKET_ISSUES:
                     reason = issue
                 elif reason == "no_initial_odds" and p.quotes:
                     reason = "no_initial_buy_price"
@@ -339,6 +367,8 @@ def notification_text(row, aliases=None):
         body = f"{'✅ Зашло' if row['bet_state'] == 'won' else '❌ Мимо'}: {match}\nИтог ставки: <b>{'+' if profit > 0 else ''}{money(profit)}</b> · {price_label} {row['odds']}"
     if (snapshot.get("quote") or {}).get("price_basis") == "midpoint_fallback":
         body += " · ориентир по стакану"
+    if (snapshot.get("quote") or {}).get("source") == "Fonbet":
+        body += " · Fonbet"
     if snapshot.get("quote") and (
         context_note := market_context_note(Quote.from_dict(snapshot["quote"]))
     ):
