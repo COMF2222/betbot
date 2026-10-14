@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from betbot.backtest import evaluate, months_before
 from betbot.domain import Prediction, utcnow
 from betbot.model import History
+from betbot.presentation import MOSCOW
 
 
 class BlindModel:
@@ -80,8 +81,15 @@ def test_tier_filter_uses_event_dates_and_does_not_score_qualifiers(tmp_path):
     from betbot.backtest import score_event
 
     source = rows()
-    day = datetime.fromtimestamp(source[0]["start_time"]).date().isoformat()
+    # UTC and Moscow have different dates here, regardless of the test host's zone.
+    source[0]["start_time"] = int(datetime(2026, 10, 13, 22, 30, tzinfo=UTC).timestamp())
+    day = datetime.fromtimestamp(source[0]["start_time"], MOSCOW).date().isoformat()
+    assert day == "2026-10-14"
     scope = {"events": [{"league_id": 123, "start_date": day, "end_date": day}]}
     assert score_event(source[0], scope)
+    assert not score_event(
+        source[0],
+        {"events": [{"league_id": 123, "start_date": "2026-10-13", "end_date": "2026-10-13"}]},
+    )
     assert not score_event({**source[0], "leagueid": 999}, scope)
     assert not score_event({**source[0], "start_time": source[0]["start_time"] + 86400 * 10}, scope)
