@@ -486,6 +486,51 @@ class Polymarket:
         )
 
     @classmethod
+    def deciding_map_context(cls, draft, event, outcome_aliases=None):
+        """A live BO3 1-1 / BO5 2-2 decider shares the played winner with the series."""
+        if (
+            not draft.active
+            or not draft.complete
+            or event.get("live") is not True
+            or event.get("ended")
+            or event.get("closed")
+            or not event.get("id")
+            or event.get("seriesSlug") != "dota-2"
+            or cls.find_event(draft, [event], outcome_aliases) is None
+        ):
+            return None
+        updated = timestamp(event.get("updatedAt"))
+        if not updated or not 0 <= (utcnow() - updated).total_seconds() <= 120:
+            return None
+        score = re.fullmatch(
+            r"[^|]*\|\s*(\d+)\s*-\s*(\d+)\s*\|\s*Bo\s*(\d+)\s*", str(event.get("score", "")), re.I
+        )
+        period = re.fullmatch(r"\s*(\d+)\s*/\s*(\d+)\s*", str(event.get("period", "")))
+        if not score or not period:
+            return None
+        a, b, best_of = map(int, score.groups())
+        current, total = map(int, period.groups())
+        formats = {int(n) for n in re.findall(r"\bBO\s*(\d+)\b", str(event.get("title", "")), re.I)}
+        if (
+            best_of not in (1, 3, 5)
+            or (formats and formats != {best_of})
+            or current != total
+            or total != best_of
+            or draft.map_number != best_of
+            or a != b
+            or a != best_of // 2
+        ):
+            return None
+        return {
+            "event_id": str(event["id"]),
+            "best_of": best_of,
+            "series_score": [a, b],
+            "map_number": current,
+            "event_updated_at": updated.isoformat(),
+            "underlying_market": "series_winner",
+        }
+
+    @classmethod
     def select_market(cls, draft, event, outcome_aliases=None):
         if not draft.map_number:
             return None, "map_unknown"
@@ -495,9 +540,24 @@ class Polymarket:
         candidates = [
             m for m in event.get("markets", []) if cls.map_market(m, draft.map_number, False)
         ]
+        context = None
         if not candidates:
-            return None, "map_market_missing"
-        matching = [m for m in candidates if cls.map_market(m, draft.map_number)]
+            context = cls.deciding_map_context(draft, event, outcome_aliases)
+            if not context:
+                return None, "map_market_missing"
+            candidates = [
+                m
+                for m in event.get("markets", [])
+                if m.get("sportsMarketType") == "moneyline"
+                and normalized(m.get("groupItemTitle", "")) in ("matchwinner", "serieswinner")
+            ]
+            if not candidates:
+                return None, "map_market_missing"
+        matching = [
+            m
+            for m in candidates
+            if not m.get("closed") and m.get("acceptingOrders") and m.get("active") is not False
+        ]
         if not matching:
             return None, "map_market_closed"
         if len(matching) != 1:
@@ -515,7 +575,7 @@ class Polymarket:
             or {normalized(x) for x in outcomes} != {rname, dname}
         ):
             return None, "market_identity"
-        return market, ""
+        return ({**market, "_deciding_map": context} if context else market), ""
 
     async def quotes(
         self, draft: Draft, event: dict, outcome_aliases: dict | None = None
@@ -533,6 +593,10 @@ class Polymarket:
         )
         result, midpoints = [], []
         traded = False
+        context = market.get("_deciding_map") or {}
+        rules = "polymarket:" + str(market.get("conditionId") or market["id"])
+        if context:
+            rules += f":decider:BO{context['best_of']}:map{draft.map_number}"
         for name, asset_id in zip(outcomes, ids, strict=True):
             book = await self.http.get(
                 "https://clob.polymarket.com/book", {"token_id": str(asset_id)}
@@ -574,7 +638,7 @@ class Polymarket:
                         observed_at=utcnow(),
                         source_updated_at=None,
                         map_number=draft.map_number,
-                        rules="polymarket:" + str(market.get("conditionId") or market["id"]),
+                        rules=rules,
                         url="https://polymarket.com/event/" + str(event.get("slug", "")),
                         gross=True,
                         liquidity=liquidity,
@@ -583,6 +647,8 @@ class Polymarket:
                         token_id=str(asset_id),
                         ask_odds=ask_odds,
                         price_basis=basis,
+                        market_basis="series_decider" if context else "",
+                        market_context=context,
                     )
                 )
         # Last trades can be stale or inconsistent after settlement even while Gamma
@@ -700,6 +766,38 @@ class OddsFeed:
             except (TypeError, ValueError, KeyError):
                 continue
         return result
+
+
+class TheOddsAPI:
+    """Coverage diagnostics only: a sports catalogue is not a Dota map odds feed."""
+
+    def __init__(self, http: HTTP, key: str):
+        self.http, self.key = http, key
+
+    async def coverage(self) -> dict:
+        sports = await self.http.get(
+            "https://api.the-odds-api.com/v4/sports", {"apiKey": self.key, "all": "true"}
+        )
+        if not isinstance(sports, list):
+            raise ProviderError("The Odds API: неверный ответ каталога видов спорта")
+        dota = [
+            {k: s.get(k) for k in ("key", "title", "active")}
+            for s in sports
+            if isinstance(s, dict)
+            and "dota"
+            in normalized(" ".join(str(s.get(k, "")) for k in ("key", "title", "description")))
+        ]
+        return {
+            "ok": True,
+            "connected": False,
+            "sports_count": len(sports),
+            "dota_sports": dota,
+            "note": (
+                "Dota найдена в каталоге; рынки отдельных карт ещё не проверены и не подключены"
+                if dota
+                else "Ключ принят, но Dota 2 отсутствует в полном каталоге; источник котировок Dota 2 не подключён"
+            ),
+        }
 
 
 class OddsPapi:

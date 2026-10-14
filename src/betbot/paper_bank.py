@@ -7,8 +7,8 @@ from dataclasses import replace
 from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
-from .domain import Prediction, timestamp, utcnow
-from .market_status import MARKET_ISSUES
+from .domain import Prediction, Quote, timestamp, utcnow
+from .market_status import MARKET_ISSUES, market_context_note
 from .presentation import esc, market_snapshot, tournament_line
 
 SKIPS = {
@@ -339,6 +339,10 @@ def notification_text(row, aliases=None):
         body = f"{'✅ Зашло' if row['bet_state'] == 'won' else '❌ Мимо'}: {match}\nИтог ставки: <b>{'+' if profit > 0 else ''}{money(profit)}</b> · {price_label} {row['odds']}"
     if (snapshot.get("quote") or {}).get("price_basis") == "midpoint_fallback":
         body += " · ориентир по стакану"
+    if snapshot.get("quote") and (
+        context_note := market_context_note(Quote.from_dict(snapshot["quote"]))
+    ):
+        body += "\n" + context_note.capitalize() + " · решающая карта"
     return "\n".join(
         [
             title,

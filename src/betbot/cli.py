@@ -14,7 +14,7 @@ from .domain import utcnow
 from .model import FEATURE_SETS, fit
 from .network import route_label, telegram_bot, telegram_proxy
 from .presentation import render_card
-from .providers import BOOKMAKERS, HTTP, OddsPapi, OpenDota, Polymarket, eligible_draft
+from .providers import BOOKMAKERS, HTTP, OddsPapi, OpenDota, Polymarket, TheOddsAPI, eligible_draft
 from .service import Service
 from .storage import Store
 
@@ -211,6 +211,13 @@ async def doctor(settings: Settings, check_bookmakers: bool):
                 )
             except Exception as exc:
                 results["sources"]["OddsPapi"] = {"ok": False, "error": str(exc)}
+        if settings.the_odds_api_key:
+            try:
+                results["sources"]["The Odds API"] = await TheOddsAPI(
+                    http, settings.the_odds_api_key
+                ).coverage()
+            except Exception as exc:
+                results["sources"]["The Odds API"] = {"ok": False, "error": str(exc)}
         sites = {
             "1win": "https://1win.com",
             "BetBoom": "https://betboom.ru",

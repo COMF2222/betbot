@@ -1,6 +1,7 @@
 """Live, comparable market moves; never change or recompute the original forecast."""
 
 from .domain import Prediction, Quote, utcnow
+from .market_status import market_context_note
 from .presentation import MOSCOW, esc, stars, tournament_line
 from .reports import market_pair
 
@@ -36,7 +37,11 @@ def identity(q):
         q.price_kind,
     ]
     # Preserve persisted identities of ordinary quotes across this upgrade.
-    return key + [q.price_basis] if q.price_basis else key
+    if q.price_basis:
+        key.append(q.price_basis)
+    if q.market_basis:
+        key.append(q.market_basis)
+    return key
 
 
 def comparable_quote(p, quotes, current):
@@ -61,6 +66,8 @@ def increased(previous, current, relative, minimum):
 def alert_text(p: Prediction, previous: float, current: Quote):
     change = current.odds / previous - 1
     basis = " · ориентир по стакану" if current.price_basis == "midpoint_fallback" else ""
+    if context_note := market_context_note(current):
+        basis += " · " + context_note
     return "\n".join(
         [
             f"📈 <b>Кэф на {esc(p.favorite_name, 45)} вырос</b>, карта {p.draft.map_number}: <b>{previous:.2f} → {current.odds:.2f}</b> (+{change:.0%})",

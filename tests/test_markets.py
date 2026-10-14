@@ -73,7 +73,7 @@ def test_only_exact_map_winner_is_accepted():
     assert not Polymarket.map_market({**base, "closed": True}, 2)
 
 
-def test_map_selection_explains_missing_final_map_and_never_substitutes_series(draft):
+def test_map_selection_requires_confirmed_deciding_context_before_using_series(draft):
     final = replace(draft, map_number=3)
     series = {
         "id": "series",

@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     steam_api_key: str = ""
     oddspapi_api_key: str = ""
     oddspapi_base_url: str = "https://api.oddspapi.io/v4"
+    the_odds_api_key: str = ""
     odds_feed_url: str = ""
     odds_feed_api_key: str = ""
 

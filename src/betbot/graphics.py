@@ -345,7 +345,10 @@ def forecast_image(p, heroes=None, assets=None, demo=False):
             label = f"На {quote_time.astimezone(MOSCOW):%H:%M} МСК · позже прогноза"
         if any(q.price_basis == "midpoint_fallback" for q in quotes.values()):
             label += " · ориентир по стакану"
-        c.text(80, 718, source.upper(), 15, bold=True, width=420, middle=True)
+        source_label = source.upper()
+        if any(q.market_basis == "series_decider" for q in quotes.values()):
+            source_label += " · РЕШАЮЩАЯ КАРТА"
+        c.text(80, 718, source_label, 15, bold=True, width=420, middle=True)
         c.text(1200, 718, label, 14, MUTED, width=660, right=True, middle=True)
         d.line((640, 741, 640, 769), fill=BORDER, width=1)
         for outcome, team, x, price_x, color in (

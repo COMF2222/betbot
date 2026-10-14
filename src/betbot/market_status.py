@@ -11,3 +11,14 @@ MARKET_ISSUES = {
     "market_source_error": "Polymarket временно не ответил при получении котировок",
     "market_disabled": "получение котировок Polymarket выключено",
 }
+
+
+def market_context_note(quote):
+    if not quote or quote.market_basis != "series_decider":
+        return ""
+    score = quote.market_context.get("series_score", [])
+    return (
+        f"рынок серии при {score[0]}:{score[1]}"
+        if len(score) == 2
+        else "рынок серии, решающая карта"
+    )

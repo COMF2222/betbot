@@ -43,6 +43,7 @@ def market_pair(quotes):
             q.market_id,
             q.price_kind,
             q.price_basis,
+            q.market_basis,
         )
         groups.setdefault(key, {})[q.outcome] = q
     ordered = sorted(groups.items(), key=lambda item: (item[0][0] != "Polymarket", item[0]))

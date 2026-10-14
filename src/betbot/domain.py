@@ -132,6 +132,8 @@ class Quote:
     ask_odds: float | None = None
     price_origin: str = "live"
     price_basis: str = ""
+    market_basis: str = ""
+    market_context: dict = field(default_factory=dict)
 
     def fresh(self, now: datetime, max_age: int) -> bool:
         age = (now - (self.source_updated_at or self.observed_at)).total_seconds()
@@ -169,6 +171,7 @@ def best_quotes(quotes: list[Quote], now: datetime, max_age: int) -> list[Quote]
             q.gross,
             q.price_kind,
             q.price_basis,
+            q.market_basis,
         )
         if key not in best or q.odds > best[key].odds:
             best[key] = q

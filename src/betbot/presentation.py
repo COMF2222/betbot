@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from PIL import ImageFont
 
 from .domain import Prediction, Quote, best_quotes, timestamp, utcnow
-from .market_status import MARKET_ISSUES
+from .market_status import MARKET_ISSUES, market_context_note
 from .timing import timing_note
 
 MOSCOW = ZoneInfo("Europe/Moscow")
@@ -132,6 +132,8 @@ def caption(p: Prediction, max_age: int = 30, heroes=None, now=None) -> str:
             line += f", {esc(opponent, 45)} {other.odds:.2f}"
         if own.price_basis == "midpoint_fallback":
             line += " · ориентир по стакану"
+        if context_note := market_context_note(own):
+            line += " · " + context_note
         info.append(line)
     else:
         issue = p.analysis.get("market_status", {}).get("code")
@@ -226,6 +228,8 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
     signal = f"{p.favorite_probability:.0%}, {stars(p.favorite_probability)}"
     own, _, market_probability = market_snapshot(p)
     price = f", кэф {own.odds:.2f}" if own else ""
+    if context_note := market_context_note(own):
+        price += f" ({context_note})"
     if own and own.price_basis == "midpoint_fallback":
         price += " (ориентир по стакану)"
     if own and (own.observed_at - p.draft.observed_at).total_seconds() > 30:
@@ -261,6 +265,7 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
                         q.gross,
                         q.market_id,
                         q.price_basis,
+                        q.market_basis,
                     )
                     != (
                         own.source,
@@ -271,6 +276,7 @@ def result_text(p: Prediction, result: dict, snapshots=None) -> str:
                         own.gross,
                         own.market_id,
                         own.price_basis,
+                        own.market_basis,
                     )
                     or q.price_kind != own.price_kind
                     or not q.fresh(when, 30)
