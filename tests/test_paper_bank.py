@@ -167,6 +167,19 @@ def test_no_overdraft_and_pause_does_not_catch_up_paused_forecasts(ledger, predi
     assert bank.summary(1)["cash_cents"] == 17900
 
 
+def test_known_payout_is_recovered_before_new_stake_after_interruption(ledger, prediction):
+    bank = PaperBank(ledger)
+    bank.start(1, 10000, 10000)
+    _, first = forecast(ledger, prediction)
+    bank.capture({1})
+    assert bank.summary(1)["cash_cents"] == 0
+    ledger.result(first.draft.match_id, {"radiant_win": first.favorite == "radiant"})
+    forecast(ledger, prediction, "2")
+    bank.capture({1})
+    assert bank.summary(1)["counts"] == {"won": 1, "open": 1}
+    assert bank.summary(1)["cash_cents"] == 7900
+
+
 def test_sessions_are_private_and_new_bank_does_not_take_old_payout(ledger, prediction):
     bank = PaperBank(ledger)
     old = bank.start(1, 100000, 10000)

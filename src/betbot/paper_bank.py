@@ -160,6 +160,8 @@ class PaperBank:
 
     def capture(self, owners, now=None, max_quote_age=30):
         now = now or utcnow()
+        # Recover an already known payout before checking funds for a new map.
+        self.settle(owners, now)
         for session in list(
             self.db.execute("SELECT * FROM paper_sessions WHERE active=1 AND closed_at IS NULL")
         ):
