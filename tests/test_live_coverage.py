@@ -262,9 +262,13 @@ async def test_one_missing_result_does_not_block_others_and_steam_can_settle(ser
     service.store.observe(second, "observed")
     service.tick_count = 6
     service.odota.pro_matches = AsyncMock(return_value=[])
-    service.odota.match = AsyncMock(
-        side_effect=[ProviderError("HTTP 404"), {"match_id": 101, "radiant_win": False}]
-    )
+
+    async def opendota_result(match_id):
+        if match_id == "100":
+            raise ProviderError("HTTP 404")
+        return {"match_id": 101, "radiant_win": False}
+
+    service.odota.match = AsyncMock(side_effect=opendota_result)
     service.steam = SimpleNamespace(
         match=AsyncMock(return_value={"match_id": 100, "radiant_win": True})
     )

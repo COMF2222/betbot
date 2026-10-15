@@ -38,6 +38,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS paper_notifications(id INTEGER PRIMARY KEY AUTOINCREMENT, bet_id INTEGER NOT NULL REFERENCES paper_bets(id), kind TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'planned', created_at TEXT NOT NULL, message_id INTEGER, error TEXT NOT NULL DEFAULT '', not_before TEXT NOT NULL DEFAULT '', UNIQUE(bet_id,kind));
             CREATE TABLE IF NOT EXISTS paper_rule_versions(id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL REFERENCES paper_sessions(id), min_forecast_id INTEGER NOT NULL, bands TEXT NOT NULL, created_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS paper_rule_versions_session ON paper_rule_versions(session_id,min_forecast_id,id);
+            CREATE TABLE IF NOT EXISTS result_checks(match_id TEXT PRIMARY KEY REFERENCES matches(id),checked_at TEXT NOT NULL);
         """)
         if "topic_id" not in {r[1] for r in self.db.execute("PRAGMA table_info(deliveries)")}:
             with self.db:
@@ -52,7 +53,9 @@ class Store:
             self.db.execute("UPDATE forecasts SET state='uncertain' WHERE state='sending'")
             self.db.execute("UPDATE reports SET state='uncertain' WHERE state='sending'")
             self.db.execute("UPDATE tournament_notices SET state='uncertain' WHERE state='sending'")
-            self.db.execute("UPDATE paper_notifications SET state='uncertain' WHERE state='sending'")
+            self.db.execute(
+                "UPDATE paper_notifications SET state='uncertain' WHERE state='sending'"
+            )
 
     def destination(self, chat_id, title, chat_type, topic_id=None, enabled=True):
         with self.db:
@@ -385,9 +388,29 @@ class Store:
         return [
             row[0]
             for row in self.db.execute(
-                "SELECT id FROM matches WHERE result IS NULL AND status!='disabled' ORDER BY seen_at DESC LIMIT 100"
+                "SELECT id FROM matches WHERE result IS NULL AND (status!='disabled' OR EXISTS(SELECT 1 FROM forecasts f WHERE f.match_id=matches.id)) ORDER BY seen_at"
             )
         ]
+
+    def result_candidates(self, limit=8, now=None) -> list[str]:
+        threshold = ((now or utcnow()) - timedelta(seconds=60)).isoformat()
+        return [
+            row[0]
+            for row in self.db.execute(
+                "SELECT m.id FROM matches m LEFT JOIN result_checks c ON c.match_id=m.id "
+                "WHERE m.result IS NULL AND (m.status!='disabled' OR EXISTS(SELECT 1 FROM forecasts f WHERE f.match_id=m.id)) "
+                "AND (c.checked_at IS NULL OR c.checked_at<=?) "
+                "ORDER BY COALESCE(c.checked_at,''),EXISTS(SELECT 1 FROM forecasts f WHERE f.match_id=m.id) DESC,m.seen_at,m.id LIMIT ?",
+                (threshold, limit),
+            )
+        ]
+
+    def result_checked(self, match_id, now=None):
+        with self.db:
+            self.db.execute(
+                "INSERT INTO result_checks VALUES (?,?) ON CONFLICT(match_id) DO UPDATE SET checked_at=excluded.checked_at",
+                (match_id, (now or utcnow()).isoformat()),
+            )
 
     def finished(self) -> list[dict]:
         return [

@@ -196,6 +196,8 @@ class Steam:
 
     def __init__(self, http: HTTP, key: str):
         self.http, self.key = http, key
+        self._history = {}
+        self._history_targets = {}
 
     async def live(self) -> list[Draft]:
         league, top = await asyncio.gather(
@@ -225,13 +227,71 @@ class Steam:
                 continue
         return merge_live_drafts(top_drafts, drafts)
 
-    async def match(self, match_id: str) -> dict:
+    async def match(self, match_id: str, league_id: int | None = None) -> dict:
         if not match_id.isdigit():
             raise ProviderError("Некорректный match ID")
+        if league_id:
+            return await self._history_result(match_id, league_id)
         raw = await self.http.get(
             self.base + "/GetMatchDetails/v1/", {"key": self.key, "match_id": match_id}
         )
         return raw.get("result", {})
+
+    async def _history_result(self, match_id: str, league_id: int) -> dict:
+        # GetMatchDetails can return HTTP 500 even for completed tournament games.
+        # Resolve a sequence number from this league, then demand the exact match ID.
+        now = time.monotonic()
+        cached_at, matches = self._history.get(league_id, (0, {}))
+        if not cached_at or now - cached_at >= 60:
+            matches = await self._league_history(league_id)
+            self._history[league_id] = (now, matches)
+        match = matches.get(match_id)
+        # Older cards may have fallen out of the latest page. A newer missing ID
+        # is usually still playing; it must not inherit the previous map's result.
+        if not match and matches and int(match_id) < max(map(int, matches)):
+            target = (league_id, match_id)
+            cached_at, older = self._history_targets.get(target, (0, {}))
+            if not cached_at or now - cached_at >= 300:
+                page = await self._league_history(league_id, match_id)
+                older = {match_id: page[match_id]} if match_id in page else {}
+                if len(self._history_targets) >= 1000:
+                    self._history_targets.pop(next(iter(self._history_targets)))
+                self._history_targets[target] = (now, older)
+            match = older.get(match_id)
+        if not match or not isinstance(match.get("match_seq_num"), int):
+            return {}
+        raw = await self.http.get(
+            self.base + "/GetMatchHistoryBySequenceNum/v1/",
+            {
+                "key": self.key,
+                "start_at_match_seq_num": match["match_seq_num"],
+                "matches_requested": 1,
+            },
+        )
+        result = raw.get("result", {})
+        for row in result.get("matches", []):
+            if (
+                str(row.get("match_id")) == match_id
+                and row.get("leagueid") == league_id
+                and row.get("match_seq_num") == match["match_seq_num"]
+                and isinstance(row.get("radiant_win"), bool)
+            ):
+                return {**row, "result_method": "GetMatchHistoryBySequenceNum"}
+        return {}
+
+    async def _league_history(self, league_id, before=None):
+        params = {"key": self.key, "league_id": league_id, "matches_requested": 100}
+        if before:
+            params["start_at_match_id"] = before
+        raw = await self.http.get(self.base + "/GetMatchHistory/v1/", params)
+        result = raw.get("result", {})
+        if result.get("status") != 1 or not isinstance(result.get("matches"), list):
+            raise ProviderError("Steam не вернул историю турнира")
+        return {
+            str(row["match_id"]): row
+            for row in result["matches"]
+            if str(row.get("match_id", "")).isdigit()
+        }
 
 
 def merge_live_drafts(opendota: list[Draft], steam: list[Draft], max_age=180) -> list[Draft]:
@@ -281,9 +341,17 @@ class OpenDota:
     def __init__(self, http: HTTP, api_key: str = ""):
         self.http = http
         self.key = {"api_key": api_key} if api_key else {}
+        self._rate_limited_until = 0.0
 
     async def get(self, path: str, **params):
-        return await self.http.get(self.base + path, {**self.key, **params})
+        if time.monotonic() < self._rate_limited_until:
+            raise ProviderError("OpenDota: пауза после HTTP 429")
+        try:
+            return await self.http.get(self.base + path, {**self.key, **params})
+        except ProviderError as exc:
+            if str(exc).startswith("HTTP 429:"):
+                self._rate_limited_until = time.monotonic() + 300
+            raise
 
     async def live(self) -> list[Draft]:
         rows = await self.get("/live")

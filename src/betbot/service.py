@@ -102,6 +102,7 @@ class Service:
         self.live_state = None
         self.shadow_live_state = None
         self.tick_count = 0
+        self.results_recent_checked_at = None
         self.tick_lock = asyncio.Lock()
         self.activity_lock = asyncio.Lock()
         self.calendar = calendar_events()
@@ -691,7 +692,7 @@ class Service:
             return None
         if late and self.steam:
             try:
-                result = await self.steam.match(draft.match_id)
+                result = await self.steam.match(draft.match_id, draft.league_id)
             except Exception:
                 result = {}
             if str(result.get("match_id")) == draft.match_id and isinstance(
@@ -950,67 +951,102 @@ class Service:
     async def collect_results(self):
         unresolved = set(self.store.unresolved())
         if not unresolved:
+            # Delivery can have failed after the last result was already saved.
+            await self.publish_results()
             return
+        checked = confirmed = 0
+        sources = {"OpenDota": [0, 0], "Steam": [0, 0]}
+
+        def save(match_id, row, source):
+            if (
+                not isinstance(row, dict)
+                or str(row.get("match_id")) != match_id
+                or not isinstance(row.get("radiant_win"), bool)
+            ):
+                return False
+            self.store.result(
+                match_id,
+                {
+                    "radiant_win": row["radiant_win"],
+                    "duration": row.get("duration"),
+                    "start_time": row.get("start_time"),
+                    "context": match_context(row),
+                    "confirmed_at": utcnow().isoformat(),
+                    "source": source,
+                    "method": row.get("result_method"),
+                    "match_seq_num": row.get("match_seq_num"),
+                },
+            )
+            unresolved.discard(match_id)
+            return True
+
         try:
-            try:
-                recent = await self.odota.pro_matches()
-            except Exception:
-                recent = []
-            for row in recent:
-                match_id = str(row.get("match_id"))
-                if match_id in unresolved and isinstance(row.get("radiant_win"), bool):
-                    context = {}
-                    try:
-                        details = await self.odota.match(match_id)
-                        if (
-                            isinstance(details.get("radiant_win"), bool)
-                            and details["radiant_win"] == row["radiant_win"]
-                        ):
-                            context = match_context(details)
-                    except Exception:
-                        pass
-                    self.store.result(
-                        match_id,
-                        {
-                            "radiant_win": row["radiant_win"],
-                            "duration": row.get("duration"),
-                            "start_time": row.get("start_time"),
-                            "context": context,
-                            "confirmed_at": utcnow().isoformat(),
-                            "source": "OpenDota",
-                        },
-                    )
-                    unresolved.discard(match_id)
-            if self.tick_count % 6 == 0:
-                for match_id in sorted(unresolved)[:8]:
-                    source = "OpenDota"
-                    try:
-                        row = await self.odota.match(match_id)
-                    except Exception:
-                        row = {}
-                    if not isinstance(row.get("radiant_win"), bool) and self.steam:
+            now = utcnow()
+            if (
+                not self.results_recent_checked_at
+                or (now - self.results_recent_checked_at).total_seconds() >= 300
+            ):
+                self.results_recent_checked_at = now
+                try:
+                    recent = await self.odota.pro_matches()
+                    sources["OpenDota"][0] += 1
+                except Exception:
+                    sources["OpenDota"][1] += 1
+                    recent = []
+                for row in recent:
+                    match_id = str(row.get("match_id"))
+                    if match_id in unresolved and isinstance(row.get("radiant_win"), bool):
                         try:
-                            row = await self.steam.match(match_id)
-                            source = "Steam"
+                            details = await self.odota.match(match_id)
+                            sources["OpenDota"][0] += 1
+                            if (
+                                str(details.get("match_id")) == match_id
+                                and details.get("radiant_win") is row["radiant_win"]
+                            ):
+                                row = {**row, **details}
                         except Exception:
-                            row = {}
-                    if str(row.get("match_id")) == match_id and isinstance(
-                        row.get("radiant_win"), bool
-                    ):
-                        self.store.result(
-                            match_id,
-                            {
-                                "radiant_win": row["radiant_win"],
-                                "duration": row.get("duration"),
-                                "start_time": row.get("start_time"),
-                                "context": match_context(row),
-                                "confirmed_at": utcnow().isoformat(),
-                                "source": source,
-                            },
+                            sources["OpenDota"][1] += 1
+                    if match_id in unresolved and save(match_id, row, "OpenDota"):
+                        confirmed += 1
+            for match_id in self.store.result_candidates():
+                self.store.result_checked(match_id)
+                checked += 1
+                draft = self.store.draft(match_id)
+                providers = ([("Steam", self.steam)] if self.steam else []) + [
+                    ("OpenDota", self.odota)
+                ]
+                for source, provider in providers:
+                    try:
+                        row = (
+                            await provider.match(match_id, draft.league_id)
+                            if source == "Steam"
+                            else await provider.match(match_id)
                         )
-            self.store.health("Результаты", True, "Проверены завершённые карты")
+                        sources[source][0] += 1
+                    except Exception:
+                        sources[source][1] += 1
+                        continue
+                    if save(match_id, row, source):
+                        confirmed += 1
+                        break
+            for source, (responses, errors) in sources.items():
+                if responses or errors:
+                    self.store.health(
+                        f"Результаты · {source}",
+                        bool(responses),
+                        f"Ответов: {responses}; ошибок: {errors}",
+                    )
+            available = sum(counts[0] for counts in sources.values())
+            if checked or confirmed or any(counts[1] for counts in sources.values()):
+                self.store.health(
+                    "Результаты",
+                    bool(available),
+                    f"Подтверждено: {confirmed}; проверено: {checked}; ожидают исхода: {len(unresolved)}"
+                    if available
+                    else "Источники результатов недоступны; очередь сохранена, повторим проверку",
+                )
         except Exception as exc:
-            self.store.health("Результаты", False, str(exc))
+            self.store.health("Результаты", False, type(exc).__name__)
         await self.publish_results()
 
     async def track_market_prices(self):
