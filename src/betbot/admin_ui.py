@@ -76,7 +76,7 @@ def home(service):
             ],
             [button("💱 Источники", "ui:sources"), button("📊 Отчёты", "ui:stats:today")],
             [button("💰 Виртуальный банк", "ui:paper")],
-            [button("🧪 Доходность · исследование", "ui:profit-lab:early")],
+            [button("🧪 Доходность · исследование", "ui:profit-lab:all")],
             [button("📬 Предпросмотры", "ui:pending"), button("🧠 Модель", "ui:model")],
             [button("🛠 Состояние", "ui:status"), button("❔ Помощь", "ui:help")],
         ],
@@ -154,7 +154,7 @@ def paper_rules_text(rules):
     return "\n".join(lines)
 
 
-def profit_lab(service, scope="early"):
+def profit_lab(service, scope="all"):
     from .profit_lab import ProfitLab, summarize
     from .profit_review import ProfitReview, progress_text
 
@@ -164,7 +164,7 @@ def profit_lab(service, scope="early"):
         return panel(
             review["text"]
             if review
-            else "Первый этап ещё не завершён. Итог появится после расчёта выборки.",
+            else "Первый этап ещё не завершён. Итог появится после расчёта 50 карт, включая поздние.",
             [[button("↻ Проверить", "ui:profit-lab:review")]],
             "ui:profit-lab:all",
         )
@@ -191,17 +191,23 @@ def profit_lab(service, scope="early"):
         text += f"\n{esc(row['name'], 65)}: <b>{value}</b> · {row['wins']}/{row['settled']}, ждём {row['pending']}"
     text += (
         "\n\nROI указан с условными расходами 2% на вход. Это проверка чувствительности, фактические комиссии и исполнение не измерены. "
-        "Ранние и поздние карты оцениваются отдельно. Прибыльная рабочая стратегия пока не подтверждена. "
+        "Основной отчёт включает поздние карты; вкладка ранних оставлена для сравнения. "
         "Ваш банк, суммы и публичные прогнозы этот раздел не меняет."
     )
     return panel(
         text,
         [
             [
-                button("После драфта", "ui:profit-lab:early"),
-                button("Все наблюдения", "ui:profit-lab:all"),
+                button(
+                    "Все наблюдения", "ui:profit-lab:all", "primary" if scope == "all" else None
+                ),
+                button(
+                    "Ранние · сравнение",
+                    "ui:profit-lab:early",
+                    "primary" if scope == "early" else None,
+                ),
             ],
-            [button("📋 Итог первого этапа", "ui:profit-lab:review")],
+            [button("📋 Итог 50 карт", "ui:profit-lab:review")],
             [button("↻ Обновить", f"ui:profit-lab:{scope}")],
         ],
         "ui:home",

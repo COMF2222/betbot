@@ -14,7 +14,7 @@ from betbot.service import Service
 from betbot.storage import Store
 
 
-def entries(count=100, *, clusters=30, timing="early", outcome=True):
+def entries(count=50, *, clusters=30, timing="early", outcome=True):
     return [
         {
             "forecast_id": index + 1,
@@ -55,59 +55,57 @@ async def service(store, tmp_path):
     await worker.close()
 
 
-def test_rubric_is_minimum_100_unique_control_maps_and_30_series():
-    assert not checkpoint(entries(99))["ready"]
-    assert not checkpoint(entries(100, clusters=29))["ready"]
+def test_rubric_is_50_observations_including_late_without_series_minimum():
+    assert not checkpoint(entries(49))["ready"]
+    assert checkpoint(entries(50, clusters=1, timing="delayed_or_unverified"))["ready"]
     assert checkpoint(entries())["ready"]
     pending = entries(outcome=None)
-    assert checkpoint(pending)["selected"] == 100
+    assert checkpoint(pending)["selected"] == 50
     assert checkpoint(pending)["settled"] == 0
     assert not checkpoint(pending)["ready"]
 
 
-def test_skipped_controls_do_not_count_eight_policies_as_eight_maps():
-    sample = entries(120)
-    for entry in sample[:21]:
-        entry["decisions"]["model_all"]["take"] = False
+def test_skipped_controls_count_toward_review_but_eight_policies_are_not_eight_maps():
+    sample = entries(49)
+    for entry in sample:
+        entry["decisions"]["model_all"] = {"take": False, "reason": "below_minimum_odds"}
     state = checkpoint(sample)
-    assert state["selected"] == state["settled"] == 99
+    assert state["selected"] == state["settled"] == 49
+    assert state["control_settled"] == 0
     assert not state["ready"]
-    assert "99/100" in progress_text(sample)
+    assert "49/50" in progress_text(sample)
 
 
 def test_sample_boundary_ignores_wins_and_result_arrival_order():
     sample = entries(150, outcome=None)
     expected = checkpoint(sample)["cutoff_forecast_id"]
-    assert expected == 100
+    assert expected == 50
     for entry in reversed(sample):
         entry["radiant_win"] = entry["forecast_id"] % 2 == 0
     assert checkpoint(list(reversed(sample)))["cutoff_forecast_id"] == expected
-    assert len(checkpoint(sample)["cohort"]) == 100
+    assert len(checkpoint(sample)["cohort"]) == 50
 
 
-def test_waits_for_30th_series_without_choosing_a_profitable_stopping_point():
-    sample = entries(100, clusters=29)
-    sample.extend(entries(1))
-    sample[-1].update(forecast_id=101, cluster="new-series")
-    assert checkpoint(sample)["cutoff_forecast_id"] == 101
-    assert checkpoint(sample)["selected"] == 101
+def test_missing_30th_series_does_not_extend_the_first_50_maps():
+    state = checkpoint(entries(100, clusters=1))
+    assert state["cutoff_forecast_id"] == 50
+    assert state["selected"] == 50 and state["clusters"] == 1
+    assert state["ready"]
 
 
-def test_waits_for_other_policy_open_maps_but_not_unselected_or_future_maps():
+def test_waits_for_result_even_if_all_policies_skipped_but_not_for_future_maps():
     sample = entries()
-    extra = deepcopy(sample[0])
-    extra.update(forecast_id=0, radiant_win=None)
-    extra["decisions"]["model_all"]["take"] = False
-    sample.append(extra)
+    sample[0]["radiant_win"] = None
+    for key in sample[0]["decisions"]:
+        sample[0]["decisions"][key] = {"take": False, "reason": "no_original_buy_pair"}
     assert checkpoint(sample)["pending_maps"] == 1
     assert not checkpoint(sample)["ready"]
-    for pick in extra["decisions"].values():
-        pick["take"] = False
-    future = deepcopy(sample[0])
-    future.update(forecast_id=101, radiant_win=None)
+    sample[0]["radiant_win"] = True
+    future = deepcopy(sample[1])
+    future.update(forecast_id=51, radiant_win=None)
     sample.append(future)
     assert checkpoint(sample)["ready"]
-    assert checkpoint(sample)["cutoff_forecast_id"] == 100
+    assert checkpoint(sample)["cutoff_forecast_id"] == 50
 
 
 def test_report_is_frozen_survives_restart_and_does_not_mutate_bank(store, tmp_path):
@@ -116,9 +114,10 @@ def test_report_is_frozen_survives_restart_and_does_not_mutate_bank(store, tmp_p
     for entry in sample:
         entry["decisions"]["strong"] = {"take": False, "reason": "weak_model"}
     review = ProfitReview(store).prepare(run, sample)
-    assert review["sample"]["settled"] == 100
-    assert review["report"]["policies"][0]["review_candidate"]
-    assert "Есть кандидаты" in review["text"]
+    assert review["sample"]["settled"] == 50
+    assert not review["report"]["policies"][0]["review_candidate"]
+    assert review["review_plan"]["target_observations"] == 50
+    assert "Плюс на общей выборке" in review["text"]
     assert "нет ставок" in review["text"]
     assert len(review["text"]) < 4096
     assert ProfitReview(store).prepare(run, entries(200, outcome=False)) == review
@@ -131,18 +130,20 @@ def test_report_is_frozen_survives_restart_and_does_not_mutate_bank(store, tmp_p
     assert store.db.execute("SELECT COUNT(*) FROM paper_sessions").fetchone()[0] == 0
 
 
-def test_delayed_winning_sample_does_not_claim_profitable_early_entry(store):
+def test_delayed_winning_sample_has_overall_verdict_without_claiming_confirmed_profit(store):
     review = ProfitReview(store).prepare(
         ProfitLab(store).start(), entries(timing="delayed_or_unverified")
     )
-    assert "данных пока недостаточно" in review["text"]
-    assert "Есть кандидаты" not in review["text"]
-    assert review["sample"]["early_controls"] == 0
+    assert "Плюс на общей выборке" in review["text"]
+    assert "включая поздние" in review["text"]
+    assert "не подтверждает будущую доходность" in review["text"]
+    assert review["sample"]["early_observations"] == 0
+    assert review["early_report"]["observations"] == 0
 
 
 def test_negative_early_sample_has_unprofitable_verdict(store):
     review = ProfitReview(store).prepare(ProfitLab(store).start(), entries(outcome=False))
-    assert "прибыльная стратегия не подтверждена" in review["text"]
+    assert "ни один вариант не вышел в плюс" in review["text"]
     assert all(row["roi"] == -1 for row in review["report"]["policies"])
 
 
@@ -166,7 +167,7 @@ async def test_private_notice_once_across_ticks_and_restart(service, tmp_path):
 
 async def test_notice_not_due_or_without_bot_cannot_send(service):
     run, _ = service.profit_lab.entries()
-    service.profit_lab = SimpleNamespace(entries=lambda: (run, entries(99)))
+    service.profit_lab = SimpleNamespace(entries=lambda: (run, entries(49)))
     await service.notify_profit_review()
     service.bot.send_message.assert_not_awaited()
     assert not ProfitReview(service.store).saved(run)
@@ -219,12 +220,41 @@ async def test_broken_research_cannot_block_worker(service):
 def test_panel_shows_target_and_preserves_original_run_and_frozen_protocol(store, prediction):
     lab = ProfitLab(store)
     run = lab.start()
-    assert "0/100" in admin_ui.profit_lab(SimpleNamespace(store=store)).text
-    assert "0/30" in admin_ui.profit_lab(SimpleNamespace(store=store)).text
+    assert "0/50" in admin_ui.profit_lab(SimpleNamespace(store=store)).text
+    assert "Минимума по числу серий нет" in admin_ui.profit_lab(SimpleNamespace(store=store)).text
+    assert (
+        "Все наблюдения, включая поздние" in admin_ui.profit_lab(SimpleNamespace(store=store)).text
+    )
     saved = ProfitReview(store).prepare(run, entries())
     assert admin_ui.profit_lab(SimpleNamespace(store=store), "review").text == saved["text"]
     assert lab.start() == run
     assert PROTOCOL_HASH == "76659e3ee8b69286a4244adf246362347dd497984c3480b7ccc586eb140b17f2"
+
+
+def test_all_skipped_observations_complete_review_without_inventing_roi(store):
+    sample = entries(timing="delayed_or_unverified")
+    for entry in sample:
+        entry["decisions"] = {
+            key: {"take": False, "reason": "no_original_buy_pair"} for key in POLICIES
+        }
+    review = ProfitReview(store).prepare(ProfitLab(store).start(), sample)
+    assert review["sample"]["settled"] == 50
+    assert review["report"]["observations"] == 50
+    assert all(row["roi"] is None and row["settled"] == 0 for row in review["report"]["policies"])
+    assert "подходящих исходных цен" in review["text"]
+
+
+def test_old_review_and_registered_decisions_are_preserved_when_target_changes(store):
+    lab = ProfitLab(store)
+    run = lab.start()
+    legacy_key = f"profit_lab_review:{run['id']}:first"
+    store.set(legacy_key, {"sample": {"settled": 100}, "text": "old review"})
+    before = store.get(f"profit_lab_run:{PROTOCOL_HASH}")
+    review = ProfitReview(store).prepare(run, entries(timing="delayed_or_unverified"))
+    assert review["sample"]["settled"] == 50
+    assert store.get(legacy_key)["text"] == "old review"
+    assert store.get(f"profit_lab_run:{PROTOCOL_HASH}") == before
+    assert ProfitReview.key(run) != legacy_key
 
 
 async def test_tick_checks_review_after_outcomes_even_with_publication_paused(service):

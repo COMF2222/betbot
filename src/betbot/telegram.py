@@ -779,7 +779,8 @@ def build_router(service: Service) -> Router:
             screen = ui.home(service)
         elif action == "profit-lab":
             screen = ui.profit_lab(
-                service, args[2] if len(args) > 2 and args[2] in ("all", "review") else "early"
+                service,
+                args[2] if len(args) > 2 and args[2] in ("all", "early", "review") else "all",
             )
         elif action.startswith("paper"):
             from .paper_bank import PaperBank

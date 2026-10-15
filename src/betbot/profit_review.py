@@ -3,38 +3,37 @@
 from html import escape
 
 from .domain import utcnow
-from .profit_lab import PROTOCOL, summarize
+from .profit_lab import summarize
+
+REVIEW_VERSION = "all-50-v1"
+REVIEW_TARGET = 50
+REVIEW_PLAN = {
+    "version": REVIEW_VERSION,
+    "target_observations": REVIEW_TARGET,
+    "timing": "all_including_delayed_or_unverified",
+    "count_basis": "all_published_forward_forecasts_with_confirmed_result",
+    "minimum_clusters": 0,
+    "classification": "exploratory",
+    "change_reason": "User requested a 50-map review including delayed observations",
+}
 
 
 def checkpoint(entries):
-    """Choose the cohort by forecast order and decisions, never by wins or ROI."""
-    cohort = []
-    controls = []
-    groups = set()
-    cutoff = None
-    for entry in sorted(entries, key=lambda item: item["forecast_id"]):
-        cohort.append(entry)
-        if entry["decisions"]["model_all"]["take"]:
-            controls.append(entry)
-            groups.add(entry["cluster"])
-        if (
-            len(controls) >= PROTOCOL["minimum_forward_trades"]
-            and len(groups) >= PROTOCOL["minimum_forward_clusters"]
-        ):
-            cutoff = entry["forecast_id"]
-            break
-    pending = sum(
-        not isinstance(entry.get("radiant_win"), bool)
-        and any(pick["take"] for pick in entry["decisions"].values())
-        for entry in cohort
-    )
+    """First 50 observed maps, chosen before results; skipped and late maps count."""
+    cohort = sorted(entries, key=lambda item: item["forecast_id"])[:REVIEW_TARGET]
+    cutoff = cohort[-1]["forecast_id"] if len(cohort) == REVIEW_TARGET else None
+    pending = sum(not isinstance(entry.get("radiant_win"), bool) for entry in cohort)
     return {
         "cohort": cohort,
         "cutoff_forecast_id": cutoff,
-        "selected": len(controls),
-        "settled": sum(isinstance(entry.get("radiant_win"), bool) for entry in controls),
-        "clusters": len(groups),
+        "selected": len(cohort),
+        "settled": len(cohort) - pending,
+        "clusters": len({entry["cluster"] for entry in cohort}),
         "pending_maps": pending,
+        "control_settled": sum(
+            isinstance(entry.get("radiant_win"), bool) and entry["decisions"]["model_all"]["take"]
+            for entry in cohort
+        ),
         "ready": cutoff is not None and pending == 0,
     }
 
@@ -44,14 +43,14 @@ def progress_text(entries, review=None):
         return "Первый этап завершён. Итог сохранён; уведомление отправляется только в личку."
     state = checkpoint(entries)
     text = (
-        f"До первого отчёта: <b>{state['settled']}/{PROTOCOL['minimum_forward_trades']}</b> "
-        f"рассчитанных контрольных ставок · серии: <b>{state['clusters']}/{PROTOCOL['minimum_forward_clusters']}</b>."
+        f"До первого отчёта: <b>{state['settled']}/{REVIEW_TARGET}</b> "
+        f"рассчитанных карт · серий: {state['clusters']}."
     )
     if state["cutoff_forecast_id"] is not None and state["pending_maps"]:
         text += f" Выборка набрана, ждём исход ещё {state['pending_maps']} карт."
     text += (
-        " Контроль — фавориты основной модели с исходным кэфом ≥1.30. "
-        "Одна карта считается один раз, восемь вариантов не складываются. "
+        " Считаем все наблюдения, включая поздние и пропущенные фильтрами карты. "
+        "Минимума по числу серий нет. Одна карта считается один раз. "
         "Когда выборка будет рассчитана, пришлю итог в личку."
     )
     return text
@@ -59,11 +58,10 @@ def progress_text(entries, review=None):
 
 def review_text(review):
     state = review["sample"]
-    early = review["early_report"]
     text = (
         "🧪 <b>Первый этап проверки доходности завершён</b>\n\n"
-        f"Контроль: <b>{state['settled']} рассчитанных ставок</b> · {state['clusters']} серий.\n"
-        f"Подтверждённо ранних в контроле: {state['early_controls']}.\n\n"
+        f"Выборка: <b>{state['settled']} рассчитанных карт</b> · {state['clusters']} серий.\n"
+        f"Ранних: {state['early_observations']} · поздних или без точного времени: {state['settled'] - state['early_observations']}.\n\n"
         "<b>Восемь вариантов · ROI с условными расходами 2% / 5%</b>\n"
     )
     for row in review["report"]["policies"]:
@@ -71,28 +69,25 @@ def review_text(review):
             f"{row['roi']:+.1%} / {row['stress_5pct_roi']:+.1%}" if row["settled"] else "нет ставок"
         )
         text += f"{escape(row['name'])}: <b>{values}</b> · {row['wins']}/{row['settled']}\n"
-    candidates = [row for row in early["policies"] if row["review_candidate"]]
-    if candidates:
-        names = ", ".join(escape(row["name"]) for row in candidates)
+    evaluated = [row for row in review["report"]["policies"] if row["settled"]]
+    positive = [row for row in evaluated if row["roi"] > 0 and row["stress_5pct_roi"] > 0]
+    if positive:
+        names = ", ".join(escape(row["name"]) for row in positive)
         verdict = (
-            f"Есть кандидаты для следующей проверки: {names}. "
-            "Это результат выборки, будущая прибыль не гарантирована."
+            f"Плюс на общей выборке при расходах 2% и 5%: {names}. "
+            "Это предварительный результат этих наблюдений."
         )
-    elif not any(
-        row["settled"] >= PROTOCOL["minimum_forward_trades"]
-        and row["clusters"] >= PROTOCOL["minimum_forward_clusters"]
-        for row in early["policies"]
-    ):
-        verdict = (
-            "Для вывода о доходности сразу после драфта данных пока недостаточно. "
-            "Поздние наблюдения не подтверждают результат раннего входа."
-        )
+    elif any(row["roi"] > 0 for row in evaluated):
+        verdict = "Положительный ROI при расходах 2% не сохранился при расходах 5%."
+    elif evaluated:
+        verdict = "На этой общей выборке ни один вариант не вышел в плюс после расходов 2%."
     else:
-        verdict = "На этой выборке прибыльная стратегия не подтверждена."
+        verdict = "Исходы собраны, но подходящих исходных цен для расчёта доходности не оказалось."
     text += (
         f"\n<b>Вердикт:</b> {verdict}\n\n"
-        "У каждого варианта своя выборка; редким фильтрам 100 контрольных карт может не хватить. "
-        "Расходы 2%/5% — допущение, фактическое исполнение не проверено. "
+        f"Это обзор первых {REVIEW_TARGET} карт, включая поздние. У фильтров своё число сделок; "
+        "карты без подходящей исходной цены учитываются в прогрессе, но не в ROI. "
+        "Расходы 2%/5% — допущение. Короткая выборка не подтверждает будущую доходность. "
         "Итог этого этапа зафиксирован. Новые наблюдения собираются дальше; банк и ставки не переключены."
     )
     return text
@@ -104,7 +99,7 @@ class ProfitReview:
 
     @staticmethod
     def key(run):
-        return f"profit_lab_review:{run['id']}:first"
+        return f"profit_lab_review:{run['id']}:{REVIEW_VERSION}"
 
     def saved(self, run):
         return self.store.get(self.key(run))
@@ -113,14 +108,24 @@ class ProfitReview:
         saved = self.saved(run)
         if saved:
             return saved
+        plan_key = f"{self.key(run)}:plan"
+        plan = self.store.get(plan_key)
+        if not plan:
+            plan = {
+                **REVIEW_PLAN,
+                "recorded_at": utcnow().isoformat(),
+                "first_forecast_id": run["first_forecast_id"],
+            }
+            self.store.set(plan_key, plan)
         state = checkpoint(entries)
         if not state["ready"]:
             return None
         cohort = state.pop("cohort")
         early = [entry for entry in cohort if entry["timing"] == "early"]
-        state["early_controls"] = sum(entry["decisions"]["model_all"]["take"] for entry in early)
+        state["early_observations"] = len(early)
         review = {
             "run_id": run["id"],
+            "review_plan": plan,
             "completed_at": utcnow().isoformat(),
             "sample": state,
             "forecast_ids": [entry["forecast_id"] for entry in cohort],
