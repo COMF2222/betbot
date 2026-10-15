@@ -276,11 +276,11 @@ async def test_commands_registered_with_admin_private_scope_and_group_bind():
         await bot.session.close()
 
 
-async def press(bot, dispatcher, data):
+async def press(bot, dispatcher, data, chat_id=1, chat_type="private"):
     message = Message(
         message_id=100,
         date=datetime.now(),
-        chat=Chat(id=1, type="private"),
+        chat=Chat(id=chat_id, type=chat_type),
         from_user=User(id=bot.id, is_bot=True, first_name="Bot"),
         text="Панель управления",
     )
@@ -292,6 +292,105 @@ async def press(bot, dispatcher, data):
         message=message,
     )
     await dispatcher.feed_update(bot, Update(update_id=2, callback_query=callback))
+
+
+async def test_paper_band_amounts_and_custom_boundaries_through_dispatcher(routed_bot):
+    from betbot.paper_bank import PaperBank, parse_bands
+
+    bot, dispatcher, service, session = routed_bot
+    bank = PaperBank(service.store)
+    identity = bank.start(1, 1000000, 10000)
+    await press(bot, dispatcher, f"ui:paper-rules:{identity}")
+    panel = session.requests[-1]
+    assert "1.30–1.49" in panel.text and "1.50–1.99" in panel.text
+    assert panel.reply_markup.inline_keyboard[0][0].callback_data == f"ui:paper-band:{identity}:0"
+    await press(bot, dispatcher, f"ui:paper-band:{identity}:1")
+    await dispatcher.feed_update(bot, update("250,50"))
+    assert [b["stake_cents"] for b in bank.rules(1)["bands"]] == [10000, 25050, 10000]
+    assert service.store.get("ui_input:1") is None
+    assert "Сохранено" in session.requests[-1].text
+    await press(bot, dispatcher, f"ui:paper-band:{identity}:0")
+    await dispatcher.feed_update(bot, update("0"))
+    assert bank.rules(1)["bands"][0]["stake_cents"] == 0
+    assert "1.30–1.49 → <b>пропуск</b>" in session.requests[-1].text
+    await press(bot, dispatcher, f"ui:paper-bands:{identity}")
+    await dispatcher.feed_update(bot, update("1.30 50\n1.70 120\n2.50 200"))
+    assert bank.rules(1)["bands"] == parse_bands("1.30 50\n1.70 120\n2.50 200")
+    await press(bot, dispatcher, "ui:paper-stake")
+    await dispatcher.feed_update(bot, update("75"))
+    assert bank.rules(1)["bands"] == parse_bands("1.30 75\n1.70 75\n2.50 75")
+    assert all(
+        request.chat_id == 1
+        for request in session.requests
+        if isinstance(request, (SendMessage, EditMessageText))
+    )
+
+
+async def test_paper_invalid_rules_keep_input_and_back_cancels_it(routed_bot):
+    from betbot.paper_bank import PaperBank
+
+    bot, dispatcher, service, session = routed_bot
+    bank = PaperBank(service.store)
+    identity = bank.start(1, 100000, 10000)
+    before = bank.rules(1)
+    await press(bot, dispatcher, f"ui:paper-bands:{identity}")
+    await dispatcher.feed_update(bot, update("1.20 100"))
+    assert bank.rules(1) == before
+    assert service.store.get("ui_input:1")["kind"] == "paper-bands"
+    assert "1.30" in session.requests[-1].text
+    await press(bot, dispatcher, f"ui:paper-rules:{identity}")
+    assert service.store.get("ui_input:1") is None
+    assert session.requests[-1].reply_markup.inline_keyboard[-1][0].callback_data == (
+        f"ui:paper-session:{identity}"
+    )
+
+
+@pytest.mark.parametrize("action", ["paper-band", "paper-bands", "paper-stake"])
+async def test_pending_rule_input_cannot_change_replaced_bank(routed_bot, action):
+    from betbot.paper_bank import PaperBank
+
+    bot, dispatcher, service, session = routed_bot
+    bank = PaperBank(service.store)
+    old = bank.start(1, 100000, 10000)
+    data = f"ui:paper-band:{old}:0" if action == "paper-band" else f"ui:{action}:{old}"
+    await press(bot, dispatcher, data)
+    new = bank.start(1, 500000, 50000)
+    before = bank.rules(1)
+    await dispatcher.feed_update(bot, update("1.30 50" if action == "paper-bands" else "50"))
+    assert bank.rules(1) == before and bank.session(1)["id"] == new
+    assert "уже закрыт" in session.requests[-1].text
+
+
+async def test_pending_band_edit_rejects_changed_rule_version(routed_bot):
+    from betbot.paper_bank import PaperBank, parse_bands
+
+    bot, dispatcher, service, session = routed_bot
+    bank = PaperBank(service.store)
+    identity = bank.start(1, 100000, 10000)
+    await press(bot, dispatcher, f"ui:paper-band:{identity}:0")
+    bank.set_bands(1, parse_bands("1.50 150"))
+    before = bank.rules(1)
+    await dispatcher.feed_update(bot, update("99"))
+    assert bank.rules(1) == before
+    assert "Правила уже изменились" in session.requests[-1].text
+
+
+async def test_paper_rules_cannot_expose_other_owner_or_be_edited_from_group(routed_bot):
+    from betbot.paper_bank import PaperBank
+
+    bot, dispatcher, service, session = routed_bot
+    bank = PaperBank(service.store)
+    own = bank.start(1, 100000, 10000)
+    other = bank.start(2, 22222200, 222200)
+    before = bank.rules(2)
+    await press(bot, dispatcher, f"ui:paper-band:{other}:0")
+    assert service.store.get("ui_input:1") is None
+    assert "222" not in session.requests[-1].text
+    requests_before = len(session.requests)
+    await press(bot, dispatcher, f"ui:paper-band:{own}:0", chat_id=-100, chat_type="group")
+    assert service.store.get("ui_input:1") is None
+    assert len(session.requests) == requests_before
+    assert bank.rules(2) == before
 
 
 async def test_price_alert_panel_can_toggle_and_set_threshold(routed_bot):

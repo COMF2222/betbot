@@ -36,6 +36,8 @@ class Store:
             CREATE UNIQUE INDEX IF NOT EXISTS paper_current_owner ON paper_sessions(owner_id) WHERE closed_at IS NULL;
             CREATE TABLE IF NOT EXISTS paper_bets(id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL REFERENCES paper_sessions(id), forecast_id INTEGER NOT NULL REFERENCES forecasts(id), match_id TEXT NOT NULL, snapshot TEXT NOT NULL, stake_cents INTEGER NOT NULL, odds TEXT, quote_at TEXT, created_at TEXT NOT NULL, state TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', payout_cents INTEGER NOT NULL DEFAULT 0, settled_at TEXT, UNIQUE(session_id,forecast_id), UNIQUE(session_id,match_id));
             CREATE TABLE IF NOT EXISTS paper_notifications(id INTEGER PRIMARY KEY AUTOINCREMENT, bet_id INTEGER NOT NULL REFERENCES paper_bets(id), kind TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'planned', created_at TEXT NOT NULL, message_id INTEGER, error TEXT NOT NULL DEFAULT '', not_before TEXT NOT NULL DEFAULT '', UNIQUE(bet_id,kind));
+            CREATE TABLE IF NOT EXISTS paper_rule_versions(id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL REFERENCES paper_sessions(id), min_forecast_id INTEGER NOT NULL, bands TEXT NOT NULL, created_at TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS paper_rule_versions_session ON paper_rule_versions(session_id,min_forecast_id,id);
         """)
         if "topic_id" not in {r[1] for r in self.db.execute("PRAGMA table_info(deliveries)")}:
             with self.db:

@@ -93,7 +93,7 @@ def paper_bank(service, owner, identity=None, notice=""):
     )
     if not summary:
         return panel(
-            "💰 <b>Виртуальный банк</b>\n\nЗадайте начальный баланс и одинаковую сумму ставки на каждый новый опубликованный прогноз. "
+            "💰 <b>Виртуальный банк</b>\n\nЗадайте начальный баланс и сумму ставки. После создания можно выбрать разные суммы для диапазонов кэфов. Кэфы ниже <b>1.30</b> пропускаем. "
             + pricing
             + "\n\nБаланс и сообщения доступны только вам в личном чате. Это учебный расчёт без комиссий и проверки объёма исполнения.",
             [[button("＋ Задать баланс и ставку", "ui:paper-new")]],
@@ -101,7 +101,9 @@ def paper_bank(service, owner, identity=None, notice=""):
         )
     counts = summary["counts"]
     profit = summary["profit"]
-    text = f"💰 <b>Виртуальный банк #{summary['id']}</b>\n\nБаланс: <b>{money(summary['equity'])}</b>\nСвободно: <b>{money(summary['cash_cents'])}</b>\nВ открытых ставках: {money(summary['reserved'])}\nСтарт: {money(summary['initial_cents'])} · ставка {money(summary['stake_cents'])}\n\nПрибыль: <b>{'+' if profit > 0 else ''}{money(profit)}</b>\n✅ {counts.get('won', 0)} · ❌ {counts.get('lost', 0)} · ⏳ {counts.get('open', 0)} · пропущено {counts.get('skipped', 0)}"
+    text = f"💰 <b>Виртуальный банк #{summary['id']}</b>\n\nБаланс: <b>{money(summary['equity'])}</b>\nСвободно: <b>{money(summary['cash_cents'])}</b>\nВ открытых ставках: {money(summary['reserved'])}\nСтарт: {money(summary['initial_cents'])}\n\nПрибыль: <b>{'+' if profit > 0 else ''}{money(profit)}</b>\n✅ {counts.get('won', 0)} · ❌ {counts.get('lost', 0)} · ⏳ {counts.get('open', 0)} · пропущено {counts.get('skipped', 0)}"
+    if not summary["closed_at"]:
+        text += "\n\n" + paper_rules_text(PaperBank(service.store).rules(owner, summary["id"]))
     if summary["turnover"]:
         text += f"\nДоходность по рассчитанным ставкам: {profit / summary['turnover']:+.1%}"
     text += (
@@ -122,8 +124,9 @@ def paper_bank(service, owner, identity=None, notice=""):
         buttons += [
             [
                 button("⏸ Пауза" if summary["active"] else "▶ Продолжить", "ui:paper-pause"),
-                button("💵 Сумма ставки", "ui:paper-stake"),
+                button("💵 Одна сумма", "ui:paper-stake"),
             ],
+            [button("🎚 Ставки по кэфам", f"ui:paper-rules:{summary['id']}", "primary")],
             [
                 button(
                     "🔔 Уведомления ✓" if summary["notifications"] else "🔕 Уведомления: выкл.",
@@ -140,11 +143,48 @@ def paper_bank(service, owner, identity=None, notice=""):
     return panel(text, buttons, "ui:paper" if closed else "ui:home")
 
 
+def paper_rules_text(rules):
+    from .paper_bank import band_label, money
+
+    lines = ["<b>Ставки по кэфам</b> · минимум <b>1.30</b>"]
+    for i, band in enumerate(rules["bands"]):
+        amount = money(band["stake_cents"]) if band["stake_cents"] else "пропуск"
+        lines.append(f"{band_label(rules['bands'], i)} → <b>{amount}</b>")
+    return "\n".join(lines)
+
+
+def paper_rules(service, owner, identity=None, notice=""):
+    from .paper_bank import PaperBank, band_label, money
+
+    bank = PaperBank(service.store)
+    session = bank.session(owner, identity)
+    if not session:
+        return paper_bank(service, owner)
+    rules = bank.rules(owner, session["id"])
+    text = f"🎚 <b>Банк #{session['id']} · настройки ставок</b>\n\n" + paper_rules_text(rules)
+    rows = []
+    if not session["closed_at"]:
+        text += "\n\nНажмите диапазон, чтобы изменить сумму. Ноль выключает ставки в нём. Границы включают нижний кэф. Новые правила действуют на следующие прогнозы."
+        for i, band in enumerate(rules["bands"]):
+            rows.append(
+                [
+                    button(
+                        f"{band_label(rules['bands'], i)} · {money(band['stake_cents']) if band['stake_cents'] else 'пропуск'}",
+                        f"ui:paper-band:{session['id']}:{i}",
+                    )
+                ]
+            )
+        rows.append([button("✍️ Изменить диапазоны", f"ui:paper-bands:{session['id']}")])
+    if notice:
+        text += "\n\n" + esc(notice, 250)
+    return panel(text, rows, f"ui:paper-session:{session['id']}")
+
+
 def paper_history(service, owner, identity, page=0):
     import json
 
     from .domain import Prediction
-    from .paper_bank import SKIPS, PaperBank, money
+    from .paper_bank import PaperBank, money, skip_text
 
     bank = PaperBank(service.store)
     if not bank.session(owner, identity):
@@ -157,7 +197,7 @@ def paper_history(service, owner, identity, page=0):
         p.draft = p.draft.with_team_aliases(service.store.get("team_aliases", {}))
         icon = {"open": "⏳", "won": "✅", "lost": "❌", "skipped": "⏭"}[row["state"]]
         detail = (
-            SKIPS[row["reason"]]
+            skip_text(row)
             if row["state"] == "skipped"
             else f"{money(row['stake_cents'])} × {row['odds']}"
         )

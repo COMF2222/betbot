@@ -8,7 +8,14 @@ import pytest
 
 from betbot.config import Settings
 from betbot.domain import Quote, utcnow
-from betbot.paper_bank import PaperBank, initial_quote, notification_text, parse_money
+from betbot.paper_bank import (
+    PaperBank,
+    initial_quote,
+    notification_text,
+    parse_bands,
+    parse_money,
+    validate_bands,
+)
 from betbot.service import Service
 from betbot.storage import Store
 
@@ -127,13 +134,15 @@ def test_bank_uses_first_buy_price_instead_of_more_optimistic_book_reference(led
     bank.start(1, 100000, 10000)
     _, p = forecast(ledger, prediction, odds=1.83, ask_odds=1.03, price_basis="midpoint_fallback")
     bank.capture({1})
-    assert bank.history(1)[0]["odds"] == "1.03"
-    assert "кэф покупки" in notification_text(bank.notifications({1})[0])
+    bet = bank.history(1)[0]
+    assert bet["odds"] == "1.03" and bet["reason"] == "below_min_odds"
+    assert "кэф ниже 1.30" in notification_text(bank.notifications({1})[0])
     assert "ориентир по стакану" not in notification_text(bank.notifications({1})[0])
     ledger.save_quotes(p.draft.match_id, [replace(p.quotes[0], ask_odds=3.0)])
     ledger.result(p.draft.match_id, {"radiant_win": p.favorite == "radiant"})
     bank.settle({1})
-    assert bank.summary(1)["profit"] == 300
+    assert bank.summary(1)["profit"] == 0
+    assert bank.summary(1)["cash_cents"] == 100000
 
 
 @pytest.mark.parametrize("ask", [None, float("nan"), float("inf"), 1, 0, 2_000_000])
@@ -316,3 +325,192 @@ async def test_service_paper_messages_go_only_to_account_owner(ledger, predictio
         assert len(calls) == 2 and all(call.args[0] == 1 for call in calls)
     finally:
         await service.close()
+
+
+@pytest.mark.parametrize(
+    ("odds", "stake", "reason"),
+    [
+        (1.29, 0, "below_min_odds"),
+        (1.30, 10000, ""),
+        (1.49, 10000, ""),
+        (1.50, 15000, ""),
+        (1.99, 15000, ""),
+        (2.00, 25050, ""),
+        (3.20, 25050, ""),
+    ],
+)
+def test_odds_bands_reserve_and_settle_exact_amounts(ledger, prediction, odds, stake, reason):
+    bank = PaperBank(ledger)
+    bank.start(1, 100000, 10000)
+    bank.set_bands(1, parse_bands("1.30 100\n1.50 150\n2.00 250,50"))
+    _, p = forecast(ledger, prediction, odds=odds)
+    bank.capture({1})
+    bank.capture({1})
+    bet = bank.history(1)[0]
+    assert bet["stake_cents"] == stake and bet["reason"] == reason
+    assert bank.summary(1)["cash_cents"] == 100000 - stake
+    assert bank.summary(1)["reserved"] == stake
+    assert bank.summary(1)["equity"] == 100000
+    ledger.result(p.draft.match_id, {"radiant_win": p.favorite == "radiant"})
+    bank.settle({1})
+    bank.settle({1})
+    assert bank.summary(1)["profit"] == bet["stake_cents"] * (round(odds * 100) - 100) // 100
+
+
+def test_disabled_and_uncovered_ranges_never_fall_back_to_another_stake(ledger, prediction):
+    bank = PaperBank(ledger)
+    bank.start(1, 100000, 10000)
+    bank.set_bands(1, parse_bands("1.50 100; 2.00 0; 3.00 200"))
+    forecast(ledger, prediction, "1", odds=1.40)
+    forecast(ledger, prediction, "2", odds=2.20)
+    forecast(ledger, prediction, "3", odds=3.0)
+    bank.capture({1})
+    rows = list(reversed(bank.history(1)))
+    assert [row["reason"] for row in rows] == ["no_stake_band", "stake_disabled", ""]
+    assert [row["stake_cents"] for row in rows] == [0, 0, 20000]
+    assert bank.summary(1)["cash_cents"] == 80000
+
+
+def test_insufficient_balance_does_not_reduce_the_selected_band_stake(ledger, prediction):
+    bank = PaperBank(ledger)
+    bank.start(1, 10000, 1000)
+    bank.set_bands(1, parse_bands("1.30 10\n2.00 150"))
+    forecast(ledger, prediction, odds=2.0)
+    bank.capture({1})
+    assert bank.history(1)[0]["reason"] == "insufficient"
+    assert bank.summary(1)["cash_cents"] == 10000
+
+
+def test_band_selection_and_payout_use_the_same_frozen_two_decimal_odds(ledger, prediction):
+    bank = PaperBank(ledger)
+    bank.start(1, 100000, 10000)
+    bank.set_bands(1, parse_bands("1.30 100\n1.50 150,25"))
+    _, p = forecast(ledger, prediction, odds=1.499)
+    bank.capture({1})
+    bet = bank.history(1)[0]
+    assert bet["odds"] == "1.50" and bet["stake_cents"] == 15025
+    ledger.result(p.draft.match_id, {"radiant_win": p.favorite == "radiant"})
+    bank.settle({1})
+    assert bank.history(1)[0]["payout_cents"] == 22538
+    assert bank.summary(1)["profit"] == 7513
+
+
+def test_versioned_rules_preserve_queued_forecasts_and_survive_restart(
+    ledger, prediction, tmp_path
+):
+    bank = PaperBank(ledger)
+    identity = bank.start(1, 100000, 10000)
+    old_version = bank.rules(1)["id"]
+    first, p = forecast(ledger, prediction, "1", odds=2.0)
+    bank.set_bands(1, parse_bands("1.30 50\n2.00 250"))
+    second, _ = forecast(ledger, prediction, "2", odds=2.0)
+    assert bank.rules(1, identity, first)["id"] == old_version
+    assert bank.rules(1, identity, second)["id"] != old_version
+    restored = Store(tmp_path / "paper.sqlite3")
+    try:
+        resumed = PaperBank(restored)
+        resumed.capture({1})
+        rows = list(reversed(resumed.history(1)))
+        assert [row["stake_cents"] for row in rows] == [10000, 25000]
+        assert json.loads(rows[0]["snapshot"])["stake_rules"]["id"] == old_version
+        snapshots = [row["snapshot"] for row in rows]
+        resumed.change_stake(1, 5000)
+        assert [row["snapshot"] for row in reversed(resumed.history(1))] == snapshots
+        restored.result(p.draft.match_id, {"radiant_win": p.favorite == "radiant"})
+        resumed.settle({1})
+        assert resumed.summary(1)["cash_cents"] == 85000
+        assert resumed.summary(1)["reserved"] == 25000
+    finally:
+        restored.close()
+
+
+def test_legacy_bank_keeps_queued_stake_when_first_rule_version_is_saved(ledger, prediction):
+    bank = PaperBank(ledger)
+    identity = bank.start(1, 100000, 10000)
+    # A pre-upgrade bank has no rule rows; its original flat amount remains authoritative.
+    with ledger.db:
+        ledger.db.execute("DELETE FROM paper_rule_versions WHERE session_id=?", (identity,))
+    assert bank.rules(1)["id"] == 0
+    assert [b["stake_cents"] for b in bank.rules(1)["bands"]] == [10000] * 3
+    forecast(ledger, prediction, "1")
+    bank.change_stake(1, 25000, identity, expected_version=0)
+    forecast(ledger, prediction, "2")
+    bank.capture({1})
+    assert [r["stake_cents"] for r in reversed(bank.history(1))] == [10000, 25000]
+
+
+def test_old_open_bet_below_new_minimum_still_settles_on_its_original_terms(ledger, prediction):
+    bank = PaperBank(ledger)
+    bank.start(1, 100000, 10000)
+    _, p = forecast(ledger, prediction)
+    bank.capture({1})
+    # Reproduce an existing pre-upgrade open bet without invoking the new capture rules.
+    with ledger.db:
+        ledger.db.execute("UPDATE paper_bets SET odds='1.03'")
+    before = bank.history(1)[0]
+    bank.set_bands(1, parse_bands("1.30 0"))
+    ledger.result(p.draft.match_id, {"radiant_win": p.favorite == "radiant"})
+    bank.settle({1})
+    after = bank.history(1)[0]
+    assert after["snapshot"] == before["snapshot"]
+    assert after["odds"] == "1.03" and after["stake_cents"] == 10000
+    assert after["payout_cents"] == 10300
+    assert bank.summary(1)["profit"] == 300
+
+
+def test_rule_edits_are_owner_scoped_and_reject_stale_or_archived_sessions(ledger):
+    bank = PaperBank(ledger)
+    old = bank.start(1, 100000, 10000)
+    version = bank.rules(1)["id"]
+    other = bank.start(2, 200000, 20000)
+    assert bank.rules(2, old) is None
+    with pytest.raises(ValueError):
+        bank.set_bands(2, parse_bands("1.30 50"), session_id=old)
+    bank.set_bands(1, parse_bands("1.30 50"), old, version)
+    with pytest.raises(ValueError):
+        bank.set_bands(1, parse_bands("1.30 200"), old, version)
+    current = bank.start(1, 300000, 30000)
+    with pytest.raises(ValueError):
+        bank.set_bands(1, parse_bands("1.30 200"), old)
+    assert bank.rules(1, old)["bands"] == parse_bands("1.30 50")
+    assert bank.rules(1, current)["bands"] == parse_bands("1.30 300\n1.50 300\n2.00 300")
+    assert bank.summary(2, other)["cash_cents"] == 200000
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "1.29 100",
+        "1.30 -1",
+        "1.30 nan",
+        "1.30 1e3",
+        "1.30 1.001",
+        "1.30 100\n1.30 200",
+        "2.00 100\n1.50 200",
+        "1.30 100 extra",
+        "inf 100",
+        "1.301 100",
+        "1000001 100",
+        "1.30 1000000001",
+        "\n".join(f"{i + 2} 100" for i in range(9)),
+    ],
+)
+def test_invalid_band_tables_are_rejected_without_mutating_rules(ledger, text):
+    bank = PaperBank(ledger)
+    bank.start(1, 100000, 10000)
+    before = bank.rules(1)
+    with pytest.raises(ValueError):
+        bank.set_bands(1, parse_bands(text))
+    assert bank.rules(1) == before
+
+
+def test_band_parser_accepts_decimal_commas_and_zero_and_rejects_noninteger_cents():
+    assert parse_bands("1,3 0\n1,50 150,25; 2 200") == [
+        {"min_odds": "1.30", "stake_cents": 0},
+        {"min_odds": "1.50", "stake_cents": 15025},
+        {"min_odds": "2.00", "stake_cents": 20000},
+    ]
+    for amount in (True, 100.5, "100", -1):
+        with pytest.raises(ValueError):
+            validate_bands([{"min_odds": "1.30", "stake_cents": amount}])

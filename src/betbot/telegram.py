@@ -785,13 +785,44 @@ def build_router(service: Service) -> Router:
                 if action == "paper-stake" and not bank.session(user_id):
                     screen = ui.paper_bank(service, user_id)
                 else:
-                    service.store.set(f"ui_input:{user_id}", {"kind": action})
+                    state = {"kind": action}
+                    if action == "paper-stake":
+                        state.update(
+                            session_id=bank.session(user_id)["id"],
+                            rule_version=bank.rules(user_id)["id"],
+                        )
+                    service.store.set(f"ui_input:{user_id}", state)
                     text = (
                         "💰 <b>Новый виртуальный банк</b>\n\nПришлите два числа: начальный баланс и сумму ставки.\nНапример: <code>10000 100</code>\n\nНачнём с новых прогнозов после сохранения. История предыдущего банка сохранится отдельно."
                         if action == "paper-new"
-                        else "💵 <b>Сумма ставки</b>\n\nПришлите сумму, например <code>100</code>. Она применяется только к новым ставкам."
+                        else "💵 <b>Одна сумма для всех кэфов</b>\n\nПришлите сумму, например <code>100</code>. Все диапазоны получат эту сумму. Кэфы ниже 1.30 пропускаем. Изменение действует на следующие прогнозы."
                     )
                     screen = ui.panel(text, [], "ui:paper")
+            elif action in ("paper-rules", "paper-band", "paper-bands"):
+                identity = int(args[2]) if len(args) >= 3 else None
+                session = bank.session(user_id, identity)
+                if not session:
+                    screen = ui.paper_bank(service, user_id)
+                elif action == "paper-rules" or session["closed_at"]:
+                    screen = ui.paper_rules(service, user_id, identity)
+                else:
+                    from .paper_bank import band_label
+
+                    identity = session["id"]
+                    rules = bank.rules(user_id, identity)
+                    state = {"kind": action, "session_id": identity, "rule_version": rules["id"]}
+                    if action == "paper-band":
+                        index = int(args[3]) if len(args) == 4 else -1
+                        if not 0 <= index < len(rules["bands"]):
+                            screen = ui.paper_rules(service, user_id, identity)
+                            await show(callback, screen)
+                            return
+                        state["band_index"] = index
+                        text = f"💵 <b>Ставка при кэфе {band_label(rules['bands'], index)}</b>\n\nПришлите сумму, например <code>100</code>.\n<code>0</code> — пропускать этот диапазон."
+                    else:
+                        text = "✍️ <b>Диапазоны и суммы</b>\n\nКаждая строка: <b>начальный кэф и ставка</b>. Пример:\n<pre>1.30 100\n1.50 150\n2.00 200</pre>\nЭто ставки 100 при 1.30–1.49, 150 при 1.50–1.99 и 200 от 2.00.\n\nГраницы идут по возрастанию, минимум 1.30, до 8 строк. Сумма 0 выключает диапазон. Ниже первой границы — пропуск."
+                    service.store.set(f"ui_input:{user_id}", state)
+                    screen = ui.panel(text, [], f"ui:paper-rules:{identity}")
             elif action == "paper-history" and len(args) == 4:
                 screen = ui.paper_history(service, user_id, int(args[2]), max(0, int(args[3])))
             elif action == "paper-sessions":
@@ -1141,10 +1172,10 @@ def build_router(service: Service) -> Router:
             await cancel(message)
             return
         state = service.store.get(f"ui_input:{message.from_user.id}")
-        if state and state.get("kind") in ("paper-new", "paper-stake"):
+        if state and state.get("kind") in ("paper-new", "paper-stake", "paper-band", "paper-bands"):
             if message.chat.id != message.from_user.id:
                 return
-            from .paper_bank import PaperBank, parse_money
+            from .paper_bank import PaperBank, parse_band_stake, parse_bands, parse_money
 
             bank = PaperBank(service.store)
             try:
@@ -1153,13 +1184,48 @@ def build_router(service: Service) -> Router:
                     if len(values) != 2:
                         raise ValueError("Нужны два числа: баланс и ставка. Например: 10000 100.")
                     bank.start(message.from_user.id, parse_money(values[0]), parse_money(values[1]))
+                elif state["kind"] == "paper-stake":
+                    bank.change_stake(
+                        message.from_user.id,
+                        parse_money(message.text),
+                        state.get("session_id"),
+                        state.get("rule_version"),
+                    )
                 else:
-                    bank.change_stake(message.from_user.id, parse_money(message.text))
+                    rules = bank.rules(message.from_user.id, state["session_id"])
+                    if not rules:
+                        raise ValueError("Этот банк недоступен. Откройте текущий банк.")
+                    bands = (
+                        parse_bands(message.text)
+                        if state["kind"] == "paper-bands"
+                        else rules["bands"]
+                    )
+                    if state["kind"] == "paper-band":
+                        index = state["band_index"]
+                        if index >= len(bands):
+                            raise ValueError("Правила уже изменились. Откройте их заново.")
+                        bands[index] = {
+                            **bands[index],
+                            "stake_cents": parse_band_stake(message.text),
+                        }
+                    bank.set_bands(
+                        message.from_user.id, bands, state["session_id"], state["rule_version"]
+                    )
             except ValueError as exc:
                 await message.answer(esc(str(exc), 250))
                 return
             clear_input(message.from_user.id)
-            await show(message, ui.paper_bank(service, message.from_user.id, notice="Сохранено."))
+            screen = (
+                ui.paper_rules(
+                    service,
+                    message.from_user.id,
+                    state["session_id"],
+                    notice="Сохранено. Новые правила действуют на следующие прогнозы.",
+                )
+                if state["kind"] in ("paper-band", "paper-bands")
+                else ui.paper_bank(service, message.from_user.id, notice="Сохранено.")
+            )
+            await show(message, screen)
             return
         if state and state.get("kind") == "league-search":
             query = message.text.strip()[:80]

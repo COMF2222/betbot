@@ -1,4 +1,4 @@
-"""Private, virtual flat-stake accounts. No execution or wallet integrations."""
+"""Private virtual accounts with frozen odds and versioned stake rules."""
 
 import json
 import math
@@ -13,6 +13,9 @@ from .fonbet import valid_reference
 from .market_status import MARKET_ISSUES, market_context_note
 from .presentation import esc, market_snapshot, tournament_line
 
+MIN_ODDS = Decimal("1.30")
+MAX_BANDS = 8
+
 SKIPS = {
     **MARKET_ISSUES,
     **FONBET_ISSUES,
@@ -20,6 +23,9 @@ SKIPS = {
     "no_initial_buy_price": "в исходном прогнозе нет доступной цены покупки этой команды",
     "already_finished": "результат уже известен, новую ставку не открываем",
     "insufficient": "не хватает свободного баланса",
+    "below_min_odds": "кэф ниже 1.30 — пропускаем",
+    "no_stake_band": "для этого кэфа не задана ставка",
+    "stake_disabled": "ставки в этом диапазоне выключены",
 }
 
 
@@ -35,6 +41,72 @@ def parse_money(value):
 
 def money(cents):
     return f"{Decimal(cents) / 100:,.2f}".replace(",", " ").replace(".", ",")
+
+
+def parse_band_stake(value):
+    return 0 if re.fullmatch(r"0(?:[,.]0{1,2})?", str(value).strip()) else parse_money(value)
+
+
+def validate_bands(bands):
+    if not isinstance(bands, list) or not 1 <= len(bands) <= MAX_BANDS:
+        raise ValueError(f"Задайте от 1 до {MAX_BANDS} диапазонов.")
+    result = []
+    previous = None
+    for band in bands:
+        if not isinstance(band, dict):
+            raise ValueError("У каждого диапазона должны быть кэф и сумма ставки.")
+        value = str(band.get("min_odds", "")).replace(",", ".")
+        if not re.fullmatch(r"\d{1,7}(?:\.\d{1,2})?", value):
+            raise ValueError("Кэф должен быть числом с двумя знаками после точки, например 1.50.")
+        floor = Decimal(value)
+        stake = band.get("stake_cents")
+        if not MIN_ODDS <= floor <= 1_000_000:
+            raise ValueError("Начало диапазона должно быть от 1.30 до 1 000 000.")
+        if previous is not None and floor <= previous:
+            raise ValueError("Начала диапазонов должны идти по возрастанию и не повторяться.")
+        if (
+            not isinstance(stake, int)
+            or isinstance(stake, bool)
+            or not 0 <= stake <= 100_000_000_000
+        ):
+            raise ValueError("Ставка должна быть от 0 до 1 000 000 000. Ноль выключает диапазон.")
+        result.append({"min_odds": f"{floor:.2f}", "stake_cents": stake})
+        previous = floor
+    return result
+
+
+def parse_bands(text):
+    bands = []
+    for line in re.split(r"[\n;]+", text.strip()):
+        if not line.strip():
+            continue
+        values = line.split()
+        if len(values) != 2:
+            raise ValueError("Каждая строка: начало диапазона и сумма. Например: 1.30 100.")
+        bands.append({"min_odds": values[0], "stake_cents": parse_band_stake(values[1])})
+    return validate_bands(bands)
+
+
+def default_bands(stake_cents):
+    return [{"min_odds": floor, "stake_cents": stake_cents} for floor in ("1.30", "1.50", "2.00")]
+
+
+def band_label(bands, index):
+    start = bands[index]["min_odds"]
+    return (
+        f"{start}–{Decimal(bands[index + 1]['min_odds']) - Decimal('0.01'):.2f}"
+        if index + 1 < len(bands)
+        else f"от {start}"
+    )
+
+
+def skip_text(row):
+    text = SKIPS.get(row["reason"], "ставка пропущена")
+    return (
+        f"{text} · кэф {row['odds']}"
+        if row["reason"] in ("below_min_odds", "no_stake_band", "stake_disabled") and row["odds"]
+        else text
+    )
 
 
 def initial_quote(prediction, created_at, max_age=30):
@@ -113,16 +185,74 @@ class PaperBank:
                 "INSERT INTO paper_sessions(owner_id,initial_cents,stake_cents,cash_cents,started_at,min_forecast_id) VALUES (?,?,?,?,?,?)",
                 (owner, initial_cents, stake_cents, initial_cents, now.isoformat(), boundary),
             )
+            self._write_rules(cursor.lastrowid, boundary, default_bands(stake_cents), now)
         return cursor.lastrowid
 
-    def change_stake(self, owner, stake_cents):
+    def _write_rules(self, session_id, boundary, bands, now=None):
+        cursor = self.db.execute(
+            "INSERT INTO paper_rule_versions(session_id,min_forecast_id,bands,created_at) VALUES (?,?,?,?)",
+            (session_id, boundary, json.dumps(bands), (now or utcnow()).isoformat()),
+        )
+        return cursor.lastrowid
+
+    def rules(self, owner, identity=None, forecast_id=None):
+        session = self.session(owner, identity)
+        if not session:
+            return None
+        query = "SELECT * FROM paper_rule_versions WHERE session_id=?"
+        args = [session["id"]]
+        if forecast_id is not None:
+            query += " AND min_forecast_id<?"
+            args.append(forecast_id)
+        row = self.db.execute(query + " ORDER BY id DESC LIMIT 1", args).fetchone()
+        return {
+            "id": row["id"] if row else 0,
+            "session_id": session["id"],
+            "minimum_odds": str(MIN_ODDS),
+            "bands": json.loads(row["bands"]) if row else default_bands(session["stake_cents"]),
+        }
+
+    def set_bands(
+        self, owner, bands, session_id=None, expected_version=None, flat_stake_cents=None
+    ):
+        bands = validate_bands(bands)
+        with self.db:
+            session = self.session(owner)
+            if not session or (session_id is not None and session["id"] != session_id):
+                raise ValueError("Этот банк уже закрыт. Откройте текущий банк и настройте ставки.")
+            current = self.rules(owner)
+            if expected_version is not None and current["id"] != expected_version:
+                raise ValueError("Правила уже изменились. Откройте их заново.")
+            if not current["id"]:
+                # Preserve the old flat amount for forecasts already waiting for capture.
+                self._write_rules(session["id"], session["min_forecast_id"], current["bands"])
+            boundary = self.db.execute("SELECT COALESCE(MAX(id),0) FROM forecasts").fetchone()[0]
+            self._write_rules(session["id"], boundary, bands)
+            if flat_stake_cents is not None:
+                self.db.execute(
+                    "UPDATE paper_sessions SET stake_cents=? WHERE id=?",
+                    (flat_stake_cents, session["id"]),
+                )
+
+    @staticmethod
+    def selected_band(rules, odds):
+        return next(
+            (band for band in reversed(rules["bands"]) if odds >= Decimal(band["min_odds"])), None
+        )
+
+    def change_stake(self, owner, stake_cents, session_id=None, expected_version=None):
         if not 0 < stake_cents <= 100_000_000_000:
             raise ValueError("Введите положительную сумму ставки.")
-        with self.db:
-            self.db.execute(
-                "UPDATE paper_sessions SET stake_cents=? WHERE owner_id=? AND closed_at IS NULL",
-                (stake_cents, owner),
-            )
+        current = self.rules(owner)
+        if not current:
+            raise ValueError("Сначала создайте виртуальный банк.")
+        self.set_bands(
+            owner,
+            [{**b, "stake_cents": stake_cents} for b in current["bands"]],
+            session_id,
+            expected_version,
+            flat_stake_cents=stake_cents,
+        )
 
     def toggle(self, owner, field):
         if field not in ("active", "notifications"):
@@ -227,13 +357,25 @@ class PaperBank:
                 current = self.session(session["owner_id"])
                 if not current or current["id"] != session["id"] or not current["active"]:
                     break
-                stake = current["stake_cents"]
+                rules = self.rules(session["owner_id"], session["id"], row["id"])
+                price = Decimal(f"{quote.odds:.2f}") if quote else None
+                band = self.selected_band(rules, price) if price is not None else None
+                stake = band["stake_cents"] if band else 0
+                if not reason:
+                    if price < MIN_ODDS:
+                        reason = "below_min_odds"
+                    elif not band:
+                        reason = "no_stake_band"
+                    elif not stake:
+                        reason = "stake_disabled"
                 if not reason and current["cash_cents"] < stake:
                     reason = "insufficient"
                 snapshot = {
                     "prediction": p.to_dict(),
                     "favorite": p.favorite,
                     "quote": quote.to_dict() if quote else None,
+                    "stake_rules": rules,
+                    "stake_band": band,
                 }
                 with self.db:
                     cursor = self.db.execute(
@@ -244,7 +386,7 @@ class PaperBank:
                             row["match_id"],
                             json.dumps(snapshot, ensure_ascii=False),
                             0 if reason else stake,
-                            f"{quote.odds:.2f}" if quote else None,
+                            str(price) if price is not None else None,
                             quote.observed_at.isoformat() if quote else None,
                             now.isoformat(),
                             "skipped" if reason else "open",
@@ -358,7 +500,7 @@ def notification_text(row, aliases=None):
     )
     if row["kind"] == "open":
         body = (
-            f"⏭ Пропуск: {match}\n{SKIPS[row['reason']]}"
+            f"⏭ Пропуск: {match}\n{skip_text(row)}"
             if row["reason"]
             else f"📝 {match}\nСтавка: <b>{money(row['stake_cents'])}</b> · {price_label} <b>{row['odds']}</b>"
         )
