@@ -156,9 +156,13 @@ async def test_profit_research_panel_is_private_and_does_not_change_bank(routed_
     assert "условными расходами 2%" in session.requests[-1].text
     await press(bot, dispatcher, "ui:profit-lab:all")
     assert "Все наблюдения" in session.requests[-1].text
+    assert "0/100" in session.requests[-1].text
+    await press(bot, dispatcher, "ui:profit-lab:review")
+    assert "этап ещё не завершён" in session.requests[-1].text
     assert bank.summary(1) == before
     before_requests = len(session.requests)
     await press(bot, dispatcher, "ui:profit-lab:all", chat_id=-100, chat_type="group")
+    await press(bot, dispatcher, "ui:profit-lab:review", chat_id=-200, chat_type="group")
     assert len(session.requests) == before_requests
 
 

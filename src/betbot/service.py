@@ -1422,6 +1422,54 @@ class Service:
             else:
                 bank.finish_notification(notification["id"], "sent", message.message_id)
 
+    async def notify_profit_review(self):
+        from .profit_review import ProfitReview
+
+        if not self.bot:
+            return
+        try:
+            run, entries = self.profit_lab.entries()
+            reviews = ProfitReview(self.store)
+            review = reviews.prepare(run, entries)
+            if not review:
+                return
+            period = reviews.key(run)
+            for admin in sorted(owner for owner in self.settings.admins if owner > 0):
+                retry_key = f"{period}:retry:{admin}"
+                retry_at = timestamp(self.store.get(retry_key))
+                if retry_at and utcnow() < retry_at:
+                    continue
+                if not self.store.begin_report(period, admin):
+                    continue
+                try:
+                    message = await self.bot.send_message(
+                        admin,
+                        review["text"],
+                        reply_markup=InlineKeyboardMarkup(
+                            inline_keyboard=[
+                                [
+                                    InlineKeyboardButton(
+                                        text="🧪 Исследование доходности",
+                                        callback_data="ui:profit-lab:review",
+                                    )
+                                ]
+                            ]
+                        ),
+                    )
+                except (TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter) as exc:
+                    self.store.finish_report(period, admin, "failed")
+                    seconds = exc.retry_after + 1 if isinstance(exc, TelegramRetryAfter) else 1800
+                    self.store.set(retry_key, (utcnow() + timedelta(seconds=seconds)).isoformat())
+                    self.store.health("Уведомления об исследовании", False, type(exc).__name__)
+                except Exception as exc:
+                    # A timeout may follow a successful send; do not duplicate it.
+                    self.store.finish_report(period, admin, "uncertain")
+                    self.store.health("Уведомления об исследовании", False, type(exc).__name__)
+                else:
+                    self.store.finish_report(period, admin, "sent", message.message_id)
+        except Exception as exc:
+            self.store.health("Уведомления об исследовании", False, type(exc).__name__)
+
     async def tick(self):
         if self.tick_lock.locked():
             return
@@ -1469,6 +1517,7 @@ class Service:
                     self.store.health("Разборы", False, type(exc).__name__)
             await self.collect_results()
             await self.paper_bets()
+            await self.notify_profit_review()
             if self.automatic and not self.paused:
                 for identity in self.store.pending_publications():
                     row = self.store.forecast(identity)

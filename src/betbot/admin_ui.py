@@ -156,8 +156,18 @@ def paper_rules_text(rules):
 
 def profit_lab(service, scope="early"):
     from .profit_lab import ProfitLab, summarize
+    from .profit_review import ProfitReview, progress_text
 
     run, entries = ProfitLab(service.store).entries()
+    review = ProfitReview(service.store).saved(run)
+    if scope == "review":
+        return panel(
+            review["text"]
+            if review
+            else "Первый этап ещё не завершён. Итог появится после расчёта выборки.",
+            [[button("↻ Проверить", "ui:profit-lab:review")]],
+            "ui:profit-lab:all",
+        )
     early = [entry for entry in entries if entry["timing"] == "early"]
     selected = entries if scope == "all" else early
     report = summarize(selected, phase="forward")
@@ -168,6 +178,8 @@ def profit_lab(service, scope="early"):
         f"Новых опубликованных прогнозов: <b>{len(entries)}</b>\n"
         f"Подтверждённо ранних: <b>{len(early)}</b> · с задержкой или без времени: {len(entries) - len(early)}\n"
         f"Начало проверки: прогноз #{run['first_forecast_id']}\n\n"
+        + progress_text(entries, review)
+        + "\n\n"
         + (
             "<b>Все наблюдения, включая поздние</b>"
             if scope == "all"
@@ -189,6 +201,7 @@ def profit_lab(service, scope="early"):
                 button("После драфта", "ui:profit-lab:early"),
                 button("Все наблюдения", "ui:profit-lab:all"),
             ],
+            [button("📋 Итог первого этапа", "ui:profit-lab:review")],
             [button("↻ Обновить", f"ui:profit-lab:{scope}")],
         ],
         "ui:home",
