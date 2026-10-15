@@ -121,7 +121,8 @@ class Store:
         return [
             r[0]
             for r in self.db.execute(
-                "SELECT DISTINCT forecast_id FROM deliveries WHERE kind='forecast' AND state IN ('planned','failed')"
+                "SELECT DISTINCT d.forecast_id FROM deliveries d JOIN forecasts f ON f.id=d.forecast_id "
+                "WHERE d.kind='forecast' AND d.state IN ('planned','failed') AND f.state!='superseded'"
             )
         ]
 
@@ -340,6 +341,16 @@ class Store:
             cursor = self.db.execute(
                 "UPDATE forecasts SET state='superseded' WHERE match_id=? AND state='preview'",
                 (match_id,),
+            )
+        return bool(cursor.rowcount)
+
+    def supersede_unsent(self, forecast_id):
+        with self.db:
+            cursor = self.db.execute(
+                "UPDATE forecasts SET state='superseded' WHERE id=? AND state='preview' "
+                "AND NOT EXISTS(SELECT 1 FROM deliveries d WHERE d.forecast_id=forecasts.id "
+                "AND d.kind='forecast' AND d.state IN ('sending','sent','uncertain','archived'))",
+                (forecast_id,),
             )
         return bool(cursor.rowcount)
 

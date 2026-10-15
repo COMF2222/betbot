@@ -696,6 +696,20 @@ class Service:
         reason = self.publication_issue(draft, late)
         self.store.observe(draft, "skipped" if reason else "observed", reason or "")
         if (
+            not reason
+            and self.settings.require_initial_odds
+            and self.automatic
+            and not self.paused
+            and self.chat_id
+            and self.model.publication_ready
+        ):
+            old = self.store.db.execute(
+                "SELECT id FROM forecasts WHERE match_id=? AND state='preview'", (draft.match_id,)
+            ).fetchone()
+            if old:
+                row = self.store.forecast(old[0])
+                self.requeue_unpriced(row, self.saved_prediction(row["payload"]))
+        if (
             reason
             or self.store.has_forecast(draft.match_id)
             or self.store.match(draft.match_id)["result"]
@@ -812,6 +826,8 @@ class Service:
             return
         row = self.store.forecast(forecast_id)
         p = self.saved_prediction(row["payload"])
+        if self.requeue_unpriced(row, p):
+            return
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -824,7 +840,11 @@ class Service:
         )
         await self.hero_assets(p.draft)
         body = render_card(p, self.heroes, self.assets)
+        if self.requeue_unpriced(row, p):
+            return
         for admin in sorted(self.settings.admins):
+            if self.requeue_unpriced(row, p):
+                break
             try:
                 await self.bot.send_photo(
                     admin,
@@ -835,6 +855,19 @@ class Service:
                 )
             except TelegramAPIError as exc:
                 self.store.health("Telegram admin", False, type(exc).__name__)
+
+    def requeue_unpriced(self, row, prediction):
+        from .quote_wait import price_for_send
+
+        if not self.settings.require_initial_odds or price_for_send(
+            prediction, timestamp(row["created_at"]), utcnow(), self.settings.quote_max_age_seconds
+        ):
+            return False
+        if self.store.supersede_unsent(row["id"]):
+            self.store.mark(
+                prediction.draft.match_id, "waiting_quotes", "Ждём исходный кэф перед публикацией"
+            )
+        return True
 
     async def publish(self, forecast_id: int) -> str:
         row = self.store.forecast(forecast_id)
@@ -862,9 +895,15 @@ class Service:
             > self.settings.max_draft_age_seconds
         ):
             return "Данные устарели: прогноз не будет опубликован."
+        if self.requeue_unpriced(row, p):
+            return (
+                "Ждём исходный кэф на эту карту. Прогноз и личное уведомление пока не отправлены."
+            )
         # Freeze both image and text before starting the remote send.
         await self.hero_assets(p.draft)
         image = render_card(p, self.heroes, self.assets)
+        if self.requeue_unpriced(row, p):
+            return "Кэф устарел во время подготовки карточки. Ожидаем новую котировку."
         if (
             self.publication_issue(p.draft, p.late_analysis)
             or (utcnow() - p.draft.observed_at).total_seconds()
@@ -878,6 +917,8 @@ class Service:
             chat_id, topic_id = target["destination"], target["topic_id"]
             if self.paused or chat_id not in {t["chat_id"] for t in self.destinations}:
                 continue
+            if self.requeue_unpriced(self.store.forecast(forecast_id), p):
+                break
             if (
                 self.publication_issue(p.draft, p.late_analysis)
                 or (utcnow() - p.draft.observed_at).total_seconds()

@@ -153,7 +153,11 @@ async def service(tmp_path, prediction):
     from betbot.storage import Store
 
     settings = Settings(
-        _env_file=None, data_dir=tmp_path, model_path=tmp_path / "none", telegram_chat_id=-100
+        _env_file=None,
+        data_dir=tmp_path,
+        model_path=tmp_path / "none",
+        telegram_chat_id=-100,
+        require_initial_odds=False,
     )
     store = Store(tmp_path / "state.db")
     store.league(123, "DreamLeague", True)

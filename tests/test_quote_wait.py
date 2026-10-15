@@ -54,7 +54,7 @@ async def worker(tmp_path, prediction, monkeypatch):
     service.hero_assets = AsyncMock()
     service.bot = SimpleNamespace(
         send_photo=AsyncMock(return_value=SimpleNamespace(message_id=100)),
-        send_message=AsyncMock(),
+        send_message=AsyncMock(return_value=SimpleNamespace(message_id=101)),
         edit_message_media=AsyncMock(),
     )
     service.store.set("auto_publish", True)
@@ -103,8 +103,10 @@ async def test_prices_available_later_become_original_only_before_publication(wo
     assert await service.process_draft(fresh) is None
 
 
-async def test_timeout_publishes_without_inventing_a_price_and_is_not_extended(worker, draft):
+async def test_timeout_keeps_waiting_without_public_or_private_messages(worker, draft):
     service, clock = worker
+    bank = PaperBank(service.store)
+    bank.start(1, 500000, 10000)
     assert await service.process_draft(draft) is None
     end = timestamp(service.store.get(f"quote_wait:{draft.match_id}")["deadline"])
     clock.now += timedelta(seconds=45)
@@ -113,11 +115,20 @@ async def test_timeout_publishes_without_inventing_a_price_and_is_not_extended(w
     assert not service.store.forecasts()
     clock.now = end
     await service.retry_waiting_quotes(set())
-    p = json.loads(service.store.forecasts()[0]["payload"])
-    assert not p["quotes"] and p["analysis"]["quote_wait"]["outcome"] == "timeout"
-    assert service.bot.send_photo.await_count == 1
+    await service.paper_bets()
+    assert not service.store.forecasts() and not bank.history(1)
+    assert not service.store.get(f"quote_wait:{draft.match_id}").get("finished_at")
+    service.bot.send_photo.assert_not_awaited()
+    service.bot.send_message.assert_not_awaited()
     await service.retry_waiting_quotes(set())
+    assert not service.store.forecasts()
+    clock.now += timedelta(seconds=10)
+    service.collect_quotes.return_value = prices(draft, clock.now)
+    await service.retry_waiting_quotes(set())
+    await service.paper_bets()
     assert service.bot.send_photo.await_count == 1
+    assert service.bot.send_message.await_count == 1
+    assert str(bank.history(1)[0]["odds"]) == "1.75"
 
 
 async def test_queue_does_not_block_other_maps_and_survives_store_restart(worker, draft):
@@ -204,7 +215,9 @@ async def test_ended_or_disabled_match_never_falls_out_of_queue_as_new_bet(worke
 
 
 @pytest.mark.parametrize("mode", ["manual", "disabled", "paused", "zero"])
-async def test_manual_preview_or_disabled_market_has_no_quote_wait(worker, draft, mode):
+async def test_strict_price_gate_cannot_be_bypassed_by_manual_disabled_paused_or_zero(
+    worker, draft, mode
+):
     service, _ = worker
     if mode == "manual":
         service.store.set("auto_publish", False)
@@ -214,8 +227,11 @@ async def test_manual_preview_or_disabled_market_has_no_quote_wait(worker, draft
         service.store.set("paused", True)
     else:
         service.settings.quote_wait_seconds = 0
-    assert await service.process_draft(draft)
-    assert not service.store.get(f"quote_wait:{draft.match_id}")
+    assert await service.process_draft(draft) is None
+    assert not service.store.forecasts()
+    service.bot.send_photo.assert_not_awaited()
+    service.bot.send_message.assert_not_awaited()
+    assert service.store.get(f"quote_wait:{draft.match_id}")
 
 
 def test_wait_deadline_is_bounded_by_original_freshness(draft, tmp_path):
@@ -235,10 +251,14 @@ async def test_partial_original_pair_can_be_completed_for_display_without_bank_b
     worker, draft
 ):
     service, clock = worker
+    service.settings.require_initial_odds = (
+        False  # Simulate a post already sent by the previous version.
+    )
     service.settings.quote_wait_seconds = 0
     service.collect_quotes.return_value = prices(draft, clock.now)[:1]
     identity = await service.process_draft(draft)
     original = service.store.forecast(identity)["payload"]
+    service.settings.require_initial_odds = True
     clock.now += timedelta(seconds=4)
     service.collect_quotes.return_value = prices(draft, clock.now)
     await service.track_market_prices()
@@ -320,3 +340,123 @@ async def test_stale_waiting_draft_and_seen_in_live_are_not_published_twice(work
     await service.retry_waiting_quotes(set())
     assert not service.store.forecasts()
     assert service.store.match(draft.match_id)["status"] == "skipped"
+
+
+async def test_late_price_after_priority_window_posts_before_private_notification(worker, draft):
+    service, clock = worker
+    bank = PaperBank(service.store)
+    bank.start(1, 500000, 10000)
+    order = []
+
+    async def public(*args, **kwargs):
+        order.append("public")
+        return SimpleNamespace(message_id=100)
+
+    async def private(*args, **kwargs):
+        order.append("private")
+        return SimpleNamespace(message_id=101)
+
+    service.bot.send_photo.side_effect = public
+    service.bot.send_message.side_effect = private
+    await service.process_draft(draft)
+    clock.now += timedelta(minutes=4)
+    fresh = replace(draft, observed_at=clock.now, source_updated_at=clock.now, game_time=140)
+    assert await service.process_draft(fresh) is None
+    await service.paper_bets()
+    assert not order and not service.store.forecasts() and not bank.history(1)
+    clock.now += timedelta(seconds=45)
+    fresh = replace(fresh, observed_at=clock.now, source_updated_at=clock.now, game_time=185)
+    service.collect_quotes.return_value = prices(fresh, clock.now)
+    identity = await service.process_draft(fresh)
+    assert identity and order == ["public"]
+    await service.paper_bets()
+    await service.paper_bets()
+    assert order == ["public", "private"]
+    payload = json.loads(service.store.forecast(identity)["payload"])
+    assert payload["timing_status"] == "late" and payload["late_analysis"]
+    assert str(bank.history(1)[0]["odds"]) == "1.75"
+    assert payload["quotes"][0]["ask_odds"] == 1.75
+
+
+async def test_unpriced_manual_forecast_is_requeued_without_rewriting_old_snapshot(
+    worker, draft, prediction
+):
+    service, clock = worker
+    service.store.observe(draft, "observed")
+    identity = service.store.add_forecast(prediction)
+    old = service.store.forecast(identity)["payload"]
+    assert "Ждём исходный кэф" in await service.publish(identity)
+    await service.preview(identity)
+    assert not service.bot.send_photo.await_count
+    assert service.store.forecast(identity)["state"] == "superseded"
+    assert service.store.forecast(identity)["payload"] == old
+    service.collect_quotes.return_value = prices(draft, clock.now)
+    await service.retry_waiting_quotes(set())
+    assert service.bot.send_photo.await_count == 1
+    assert service.store.forecast(identity)["payload"] == old
+
+
+async def test_price_expiring_during_card_generation_is_recollected_before_first_send(
+    worker, draft
+):
+    service, clock = worker
+    service.collect_quotes.return_value = prices(draft, clock.now)
+
+    async def slow_assets(draft):
+        clock.now += timedelta(seconds=31)
+
+    service.hero_assets.side_effect = slow_assets
+    identity = await service.process_draft(draft)
+    old = service.store.forecast(identity)["payload"]
+    assert service.store.forecast(identity)["state"] == "superseded"
+    service.bot.send_photo.assert_not_awaited()
+    service.hero_assets.side_effect = None
+    service.collect_quotes.return_value = prices(draft, clock.now)
+    await service.retry_waiting_quotes(set())
+    assert service.bot.send_photo.await_count == 1
+    assert service.store.forecast(identity)["payload"] == old
+
+
+async def test_uncertain_existing_send_cannot_be_superseded_to_bypass_delivery_guard(
+    worker, draft, prediction
+):
+    service, _ = worker
+    service.store.observe(draft, "observed")
+    identity = service.store.add_forecast(prediction)
+    delivery = service.store.begin_delivery(identity, "forecast", -100)
+    service.store.finish_delivery(delivery, "uncertain")
+    await service.publish(identity)
+    assert service.store.forecast(identity)["state"] == "uncertain"
+    assert service.store.has_forecast(draft.match_id)
+    service.bot.send_photo.assert_not_awaited()
+
+
+async def test_old_timeout_state_does_not_release_unpriced_signal_after_upgrade(worker, draft):
+    service, clock = worker
+    service.store.set(
+        f"quote_wait:{draft.match_id}",
+        {
+            "started_at": clock.now.isoformat(),
+            "deadline": clock.now.isoformat(),
+            "finished_at": clock.now.isoformat(),
+            "outcome": "timeout",
+            "checks": [],
+        },
+    )
+    assert await service.process_draft(draft) is None
+    service.bot.send_photo.assert_not_awaited()
+    service.bot.send_message.assert_not_awaited()
+    assert not service.store.forecasts()
+
+
+async def test_manual_preview_waits_for_price_and_does_not_repeat_every_tick(worker, draft):
+    service, clock = worker
+    service.store.set("auto_publish", False)
+    assert await service.process_draft(draft) is None
+    service.collect_quotes.return_value = prices(draft, clock.now)
+    identity = await service.process_draft(draft)
+    assert identity and service.store.forecast(identity)["state"] == "preview"
+    assert service.bot.send_photo.await_count == 1
+    clock.now += timedelta(seconds=45)
+    assert await service.process_draft(draft) is None
+    assert service.bot.send_photo.await_count == 1

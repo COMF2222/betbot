@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     morning_brief_hour: int = 10
     quote_max_age_seconds: int = 30
     quote_wait_seconds: int = 120
+    require_initial_odds: bool = True
     odds_alerts_enabled: bool = True
     odds_alert_relative_increase: float = 0.20
     odds_alert_min_increase: float = 0.20

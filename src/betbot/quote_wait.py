@@ -1,4 +1,4 @@
-"""A bounded publication queue, with no sleep and no retrospective starting odds."""
+"""Wait for original odds before any post, without blocking other maps."""
 
 import math
 from dataclasses import replace
@@ -30,6 +30,16 @@ def original_pair_ready(prediction, max_age, now):
     )
 
 
+def price_for_send(prediction, created_at, now, max_age):
+    from .paper_bank import initial_quote
+
+    return bool(
+        initial_quote(prediction, created_at, max_age)
+        and initial_quote(prediction, now, max_age)
+        and market_snapshot(prediction, max_age, now)[0]
+    )
+
+
 def deadline(draft, now, settings):
     # Leave time for the final fetch and card generation before freshness expires.
     end = min(
@@ -47,31 +57,46 @@ def deadline(draft, now, settings):
 
 def defer(service, prediction):
     """A retry re-evaluates the live draft; no forecast or bet exists while waiting."""
-    if not (
+    from .paper_bank import initial_quote, initial_source
+
+    strict = service.settings.require_initial_odds and bool(service.bot)
+    priority = bool(
         service.settings.quote_wait_seconds
+        and service.store.get("source:Polymarket", True)
+        and service.store.get(f"poly_league:{prediction.draft.league_id}") != ""
+    )
+    legacy = (
+        priority
         and service.automatic
         and not service.paused
         and service.chat_id
         and service.model.publication_ready
-        and service.store.get("source:Polymarket", True)
-        and service.store.get(f"poly_league:{prediction.draft.league_id}") != ""
-    ):
+    )
+    if not strict and not legacy:
         return False
     now = utcnow()
     key = f"quote_wait:{prediction.draft.match_id}"
     state = service.store.get(key)
     ready = original_pair_ready(prediction, service.settings.quote_max_age_seconds, now)
-    if not state and ready:
+    source = initial_source(prediction, now, service.settings.quote_max_age_seconds)
+    priced = replace(prediction, analysis={**prediction.analysis, "initial_odds_source": source})
+    executable = bool(initial_quote(priced, now, service.settings.quote_max_age_seconds))
+    ready = ready and executable
+    if not state and (ready or not priority and executable):
         return False
     if not state:
         state = {
             "started_at": now.isoformat(),
-            "deadline": deadline(prediction.draft, now, service.settings).isoformat(),
+            "deadline": (
+                deadline(prediction.draft, now, service.settings) if priority else now
+            ).isoformat(),
             "checks": [],
         }
-    if state.get("finished_at"):
+    if state.get("finished_at") and not strict:
         prediction.analysis = {**prediction.analysis, "quote_wait": state}
         return False
+    state.pop("finished_at", None)
+    state.pop("outcome", None)
     state["checks"].append(
         {
             "at": now.isoformat(),
@@ -82,8 +107,13 @@ def defer(service, prediction):
         }
     )
     state["checks"] = state["checks"][-12:]
-    if ready or now >= timestamp(state["deadline"]):
-        state.update(finished_at=now.isoformat(), outcome="paired_price" if ready else "timeout")
+    expired = not priority or now >= timestamp(state["deadline"])
+    if ready or expired and (executable or not strict):
+        state.update(
+            finished_at=now.isoformat(),
+            outcome="paired_price" if ready else "priced_fallback" if executable else "timeout",
+            source=source if executable else None,
+        )
         prediction.analysis = {**prediction.analysis, "quote_wait": state}
         service.store.set(key, state)
         return False

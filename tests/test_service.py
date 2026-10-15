@@ -21,6 +21,7 @@ async def service(tmp_path, prediction):
         model_path=tmp_path / "missing.json",
         admin_ids="1",
         telegram_chat_id=-100,
+        require_initial_odds=False,  # These tests exercise legacy forecast delivery without a feed.
     )
     store = Store(tmp_path / "ledger.sqlite3")
     store.league(123, "Test", True)
