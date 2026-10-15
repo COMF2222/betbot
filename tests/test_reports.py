@@ -211,7 +211,7 @@ def test_missing_quotes_are_not_fabricated_and_demo_is_explicit(tmp_path, predic
         store, (now - timedelta(days=1)).isoformat(), (now + timedelta(days=1)).isoformat()
     )
     assert data["market_count"] == 0 and data["market_expected"] == 0
-    assert "Сравнение с рынком появится" in report_caption(data)
+    assert "не хватило исходных парных котировок" in report_caption(data)
     demo = demo_report()
     assert demo["wins"] == 6 and demo["settled"] == 7 and demo["demo"]
     assert "ДЕМОНСТРАЦИЯ" in report_caption(demo)
@@ -228,7 +228,7 @@ def test_complete_report_title_and_market_line_are_not_truncated_or_duplicated()
     data["label"] = "Предварительные итоги дня · отдельный учёт"
     data["cumulative"] = {key: data[key] for key in data["cumulative"]}
     text = report_caption(data)
-    assert "предварительные итоги дня</b>" in text
+    assert f"предварительные итоги дня · {data['date'][8:10]}.{data['date'][5:7]}</b>" in text
     assert text.count("Рынок") == 1
     assert len(text) < 1024
 

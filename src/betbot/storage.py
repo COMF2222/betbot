@@ -392,6 +392,17 @@ class Store:
             )
         ]
 
+    def waiting_quote_drafts(self):
+        return [
+            Draft.from_dict(json.loads(row[0]))
+            for row in self.db.execute(
+                "SELECT m.draft FROM matches m JOIN leagues l ON l.id=json_extract(m.draft,'$.league_id') "
+                "WHERE m.status='waiting_quotes' AND m.result IS NULL AND l.enabled=1 "
+                "AND NOT EXISTS(SELECT 1 FROM forecasts f WHERE f.match_id=m.id AND f.state!='superseded') "
+                "ORDER BY m.seen_at,m.id LIMIT 8"
+            )
+        ]
+
     def result_candidates(self, limit=8, now=None) -> list[str]:
         threshold = ((now or utcnow()) - timedelta(seconds=60)).isoformat()
         return [

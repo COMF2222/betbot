@@ -228,7 +228,8 @@ def report_payload(store, since, until, label="Итоги дня", destination=N
 def report_caption(data):
     total = data["settled"]
     label = data["label"].lower().replace(" · отдельный учёт", "")
-    title = f"{'✅' if data['accuracy'] is not None and data['accuracy'] >= 0.5 else '📊'} <b>{data['wins']} из {total} · {esc(label, 100)}</b>"
+    date_label = f" · {datetime.fromisoformat(data['date']):%d.%m}" if data.get("date") else ""
+    title = f"{'✅' if data['accuracy'] is not None and data['accuracy'] >= 0.5 else '📊'} <b>{data['wins']} из {total} · {esc(label, 100)}{date_label}</b>"
     lines = [title]
     if data.get("late_analysis"):
         lines.append("⏱ Статистика отдельно: разборы после старта или без точного времени.")
@@ -248,7 +249,7 @@ def report_caption(data):
         if data["against_count"]:
             lines.append(f"Против рынка: {data['against_wins']} из {data['against_count']}.")
     else:
-        lines.append("ℹ️ Сравнение с рынком появится после сохранения парных котировок.")
+        lines.append("ℹ️ Для сравнения с рынком не хватило исходных парных котировок.")
     if data["comeback"]:
         c = data["comeback"]
         lines.append(

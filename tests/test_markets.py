@@ -159,6 +159,48 @@ def test_ambiguous_events_are_not_bound(draft):
     assert Polymarket.find_event(draft, [event, {**event, "id": "other"}]) is None
 
 
+@pytest.mark.parametrize(
+    "source,public",
+    [("_PowerRangers", "Power Rangers"), ("stariy_bog Team", "Stariy bog Team")],
+)
+def test_underscores_in_dota_names_do_not_hide_the_exact_market(draft, source, public):
+    actual = replace(draft, radiant_name=source, dire_name="Kalmychata")
+    event = {
+        "id": "verified",
+        "teams": [{"name": public}, {"name": "Kalmychata"}],
+        "startTime": draft.observed_at.isoformat(),
+    }
+    assert Polymarket.find_event(actual, [event]) == event
+    assert Polymarket.find_event(actual, [event, {**event, "id": "ambiguous"}]) is None
+    assert (
+        Polymarket.find_event(
+            actual, [{**event, "startTime": (draft.observed_at - timedelta(days=1)).isoformat()}]
+        )
+        is None
+    )
+
+
+async def test_underscore_normalization_keeps_outcome_sides_on_the_same_map(draft):
+    actual = replace(draft, radiant_name="_PowerRangers", dire_name="kalmychata")
+    event = {
+        "markets": [
+            {
+                "id": "7",
+                "clobTokenIds": '["r-token","d-token"]',
+                "question": "Game 2 Winner",
+                "sportsMarketType": "child_moneyline",
+                "acceptingOrders": True,
+                "outcomes": '["Kalmychata","Power Rangers"]',
+            }
+        ]
+    }
+    http = FakeHTTP(
+        {"asks": [{"price": "0.6", "size": "10"}], "bids": [{"price": "0.5", "size": "10"}]}
+    )
+    quotes = await Polymarket(http).quotes(actual, event)
+    assert [q.outcome for q in quotes] == ["dire", "radiant"]
+
+
 def test_cloud_rising_market_cannot_be_bound_to_cloud_dawning_even_with_same_opponent(draft):
     actual = replace(draft, radiant_name="ZENITH", dire_name="Cloud Dawning")
     wrong = {

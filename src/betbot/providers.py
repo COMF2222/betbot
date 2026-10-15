@@ -60,7 +60,7 @@ class HTTP:
 
 
 def normalized(value: str) -> str:
-    return re.sub(r"[^\w]", "", unicodedata.normalize("NFKC", value).casefold())
+    return re.sub(r"[\W_]", "", unicodedata.normalize("NFKC", value).casefold())
 
 
 def json_list(value: Any) -> list:

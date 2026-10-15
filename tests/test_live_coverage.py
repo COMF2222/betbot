@@ -195,6 +195,7 @@ async def test_public_names_do_not_change_saved_prediction_or_player_features(se
 async def test_low_confidence_delayed_analysis_is_published_once_to_both_destinations(
     service, draft
 ):
+    service.settings.quote_wait_seconds = 0  # Fan-out is independent of the quote queue.
     service.store.destination(-200, "Channel", "channel")
     service.bot = SimpleNamespace(
         send_photo=AsyncMock(return_value=SimpleNamespace(message_id=10)),

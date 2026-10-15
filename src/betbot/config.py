@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     morning_brief_enabled: bool = True
     morning_brief_hour: int = 10
     quote_max_age_seconds: int = 30
+    quote_wait_seconds: int = 120
     odds_alerts_enabled: bool = True
     odds_alert_relative_increase: float = 0.20
     odds_alert_min_increase: float = 0.20
@@ -86,6 +87,13 @@ class Settings(BaseSettings):
     def game_time(cls, value: int) -> int:
         if value < 0:
             raise ValueError("Время игры должно быть неотрицательным")
+        return value
+
+    @field_validator("quote_wait_seconds")
+    @classmethod
+    def quote_wait(cls, value: int) -> int:
+        if not 0 <= value <= 300:
+            raise ValueError("Ожидание котировок должно быть от 0 до 300 секунд")
         return value
 
     @property

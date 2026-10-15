@@ -542,7 +542,18 @@ class Service:
                 if binding:
                     event = await self.poly.event(str(binding))
                 else:
-                    events = await self.poly.discover()
+                    waiting = self.store.get(f"quote_wait:{draft.match_id}")
+                    force = bool(
+                        waiting
+                        and not waiting.get("finished_at")
+                        and self.poly.loaded_at
+                        and (utcnow() - self.poly.loaded_at).total_seconds() >= 30
+                    )
+                    events = (
+                        await self.poly.discover(force=True)
+                        if force
+                        else await self.poly.discover()
+                    )
                     event = self.automatic_market_event(draft, events, aliases)
                     if event:
                         # Discovery is cached for two minutes; refresh the matched event.
@@ -730,6 +741,14 @@ class Service:
             self.store.mark(draft.match_id, "skipped", "нет достаточно выраженного фаворита")
             return None
         p.quotes = await self.collect_quotes(draft)
+        self.store.save_quotes(draft.match_id, p.quotes)
+        from .quote_wait import defer
+
+        if defer(self, p):
+            return None
+        # Fetching prices takes time; do not retain an early label after its window.
+        p.timing_status = draft_timing(draft, self.settings.max_game_time_seconds)
+        p.late_analysis = p.timing_status != "early"
         from .paper_bank import initial_source
 
         selected_source = initial_source(p, utcnow(), self.settings.quote_max_age_seconds)
@@ -742,7 +761,6 @@ class Service:
         p.league_name = next(
             (r["name"] for r in self.store.leagues() if r["id"] == draft.league_id), ""
         )
-        self.store.save_quotes(draft.match_id, p.quotes)
         if self.store.get("duration_enabled", False):
             for q in p.quotes:
                 if q.market == "duration_total" and q.line is not None:
@@ -1071,7 +1089,7 @@ class Service:
             ):
                 quotes = await self.collect_quotes(p.draft, include_fonbet=False)
                 self.store.save_quotes(p.draft.match_id, quotes)
-                if not p.quotes and quotes:
+                if market_snapshot(p)[1] is None and quotes:
                     await self.attach_missing_quotes(row["id"], p, quotes)
                 await self.notify_price_increase(row["id"], p, quotes)
                 tracked += 1
@@ -1470,6 +1488,28 @@ class Service:
         except Exception as exc:
             self.store.health("Уведомления об исследовании", False, type(exc).__name__)
 
+    async def retry_waiting_quotes(self, seen):
+        for draft in self.store.waiting_quote_drafts():
+            if draft.match_id in seen:
+                continue
+            try:
+                await self.process_draft(draft)
+            except Exception as exc:
+                self.store.health("Ожидание котировок", False, type(exc).__name__)
+
+    def quote_wait_timeout(self):
+        now = utcnow()
+        deadlines = [
+            timestamp(self.store.get(f"quote_wait:{draft.match_id}", {}).get("deadline"))
+            for draft in self.store.waiting_quote_drafts()
+        ]
+        remaining = [(end - now).total_seconds() for end in deadlines if end and end > now]
+        return (
+            min(self.settings.poll_seconds, min(remaining))
+            if remaining
+            else self.settings.poll_seconds
+        )
+
     async def tick(self):
         if self.tick_lock.locked():
             return
@@ -1480,6 +1520,7 @@ class Service:
             await self.refresh_league_activity()
             if self.fonbet and self.store.get("source:Fonbet", True):
                 await self.fonbet.refresh(self.fonbet_league_names())
+            seen = set()
             if self.store.leagues(enabled_only=True):
                 try:
                     drafts = await self.live_drafts()
@@ -1487,6 +1528,7 @@ class Service:
                     for draft in drafts:
                         if not self.store.enabled(draft.league_id):
                             continue
+                        seen.add(draft.match_id)
                         draft = draft.with_team_aliases(self.store.get("team_aliases", {}))
                         try:
                             await self.process_draft(draft)
@@ -1515,6 +1557,7 @@ class Service:
                     )
                 except Exception as exc:
                     self.store.health("Разборы", False, type(exc).__name__)
+            await self.retry_waiting_quotes(seen)
             await self.collect_results()
             await self.paper_bets()
             await self.notify_profit_review()
@@ -1552,6 +1595,6 @@ class Service:
                 log.warning("Worker cycle failed: %s", type(exc).__name__)
                 heartbeat(self.settings, False)
             try:
-                await asyncio.wait_for(self.stop.wait(), timeout=self.settings.poll_seconds)
+                await asyncio.wait_for(self.stop.wait(), timeout=self.quote_wait_timeout())
             except TimeoutError:
                 pass
