@@ -7,6 +7,7 @@ import random
 from collections import Counter, defaultdict
 from dataclasses import replace
 from datetime import timedelta
+from pathlib import Path
 
 from .domain import Prediction, timestamp, utcnow
 from .presentation import market_snapshot
@@ -40,6 +41,9 @@ PROTOCOL = {
     "automatic_promotion": False,
     "scope": "Polymarket original paired buy prices; early and delayed kept separate",
     "cost_note": "2% and 5% are stress assumptions, not measured market fees or fill costs",
+    "implementation_sha256": hashlib.sha256(
+        Path(__file__).read_text(encoding="utf-8").encode()
+    ).hexdigest(),
 }
 PROTOCOL_HASH = hashlib.sha256(
     json.dumps(PROTOCOL, ensure_ascii=False, sort_keys=True).encode()
@@ -281,6 +285,8 @@ class ProfitLab:
             shadow = None
         # Quote time and shadow time are recorded separately; neither is backdated.
         picks = decisions(prediction, when, shadow, shadow_as_of=decision_at)
+        if decision_at > when + timedelta(seconds=30):
+            picks = {key: {"take": False, "reason": "recording_late"} for key in POLICIES}
         self.store.set(
             key,
             {
@@ -288,6 +294,8 @@ class ProfitLab:
                 "match_id": prediction.draft.match_id,
                 "recorded_at": decision_at.isoformat(),
                 "created_at": when.isoformat(),
+                "model_version": prediction.model_version,
+                "shadow_snapshot": shadow,
                 "timing": "early"
                 if prediction.timing_status == "early" and not prediction.late_analysis
                 else "delayed_or_unverified",

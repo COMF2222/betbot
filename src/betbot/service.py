@@ -25,6 +25,7 @@ from .leagues import activity_snapshot, calendar_events
 from .market_status import MARKET_ISSUES
 from .model import History, Model
 from .presentation import MOSCOW, caption, market_snapshot, render_card, result_text
+from .profit_lab import ProfitLab
 from .providers import (
     HTTP,
     OddsFeed,
@@ -112,6 +113,8 @@ class Service:
         self.stop = asyncio.Event()
         self.assets = settings.data_dir / "heroes"
         self.assets.mkdir(parents=True, exist_ok=True)
+        self.profit_lab = ProfitLab(store)
+        self.profit_lab.start()
 
     @property
     def chat_id(self):
@@ -758,6 +761,13 @@ class Service:
         forecast_id = self.store.add_forecast(p)
         if forecast_id:
             self.record_shadow(p)
+            try:
+                self.profit_lab.record(forecast_id)
+                self.store.health(
+                    "Исследование доходности", True, "Отбор записан до результата карты"
+                )
+            except Exception as exc:
+                self.store.health("Исследование доходности", False, type(exc).__name__)
             self.store.mark(draft.match_id, "preview", "")
             if self.automatic and not self.paused and self.model.publication_ready and self.chat_id:
                 await self.publish(forecast_id)

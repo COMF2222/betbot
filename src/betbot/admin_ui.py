@@ -76,6 +76,7 @@ def home(service):
             ],
             [button("💱 Источники", "ui:sources"), button("📊 Отчёты", "ui:stats:today")],
             [button("💰 Виртуальный банк", "ui:paper")],
+            [button("🧪 Доходность · исследование", "ui:profit-lab:early")],
             [button("📬 Предпросмотры", "ui:pending"), button("🧠 Модель", "ui:model")],
             [button("🛠 Состояние", "ui:status"), button("❔ Помощь", "ui:help")],
         ],
@@ -151,6 +152,47 @@ def paper_rules_text(rules):
         amount = money(band["stake_cents"]) if band["stake_cents"] else "пропуск"
         lines.append(f"{band_label(rules['bands'], i)} → <b>{amount}</b>")
     return "\n".join(lines)
+
+
+def profit_lab(service, scope="early"):
+    from .profit_lab import ProfitLab, summarize
+
+    run, entries = ProfitLab(service.store).entries()
+    early = [entry for entry in entries if entry["timing"] == "early"]
+    selected = entries if scope == "all" else early
+    report = summarize(selected, phase="forward")
+    text = (
+        "🧪 <b>Исследование доходности</b>\n\n"
+        "Сравниваем отбор ставок по исходной цене покупки. У каждого варианта одинаковая условная ставка 1. "
+        "Записи сделаны до результата; старые карты сюда не добавляются.\n\n"
+        f"Новых опубликованных прогнозов: <b>{len(entries)}</b>\n"
+        f"Подтверждённо ранних: <b>{len(early)}</b> · с задержкой или без времени: {len(entries) - len(early)}\n"
+        f"Начало проверки: прогноз #{run['first_forecast_id']}\n\n"
+        + (
+            "<b>Все наблюдения, включая поздние</b>"
+            if scope == "all"
+            else "<b>Только подтверждённо ранние карты</b>"
+        )
+    )
+    for row in report["policies"]:
+        value = f"{row['roi']:+.1%}" if row["roi"] is not None else "нет расчётов"
+        text += f"\n{esc(row['name'], 65)}: <b>{value}</b> · {row['wins']}/{row['settled']}, ждём {row['pending']}"
+    text += (
+        "\n\nROI указан с условными расходами 2% на вход. Это проверка чувствительности, фактические комиссии и исполнение не измерены. "
+        "Ранние и поздние карты оцениваются отдельно. Прибыльная рабочая стратегия пока не подтверждена. "
+        "Ваш банк, суммы и публичные прогнозы этот раздел не меняет."
+    )
+    return panel(
+        text,
+        [
+            [
+                button("После драфта", "ui:profit-lab:early"),
+                button("Все наблюдения", "ui:profit-lab:all"),
+            ],
+            [button("↻ Обновить", f"ui:profit-lab:{scope}")],
+        ],
+        "ui:home",
+    )
 
 
 def paper_rules(service, owner, identity=None, notice=""):

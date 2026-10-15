@@ -745,13 +745,13 @@ def build_router(service: Service) -> Router:
     async def navigate(callback: CallbackQuery):
         args = callback.data.split(":")
         action, user_id = args[1], callback.from_user.id
-        if action.startswith("paper") and (
+        if (action.startswith("paper") or action == "profit-lab") and (
             not isinstance(callback.message, Message)
             or callback.message.chat.type != ChatType.PRIVATE
             or callback.message.chat.id != user_id
         ):
             await callback.answer(
-                "Виртуальный банк доступен только в личной админке.", show_alert=True
+                "Банк и исследование доходности доступны только в личной админке.", show_alert=True
             )
             return
         if action in (
@@ -777,6 +777,10 @@ def build_router(service: Service) -> Router:
             for view in ("current", "selected", "archive"):
                 service.store.set(f"ui_filter:{user_id}:{view}", "")
             screen = ui.home(service)
+        elif action == "profit-lab":
+            screen = ui.profit_lab(
+                service, "all" if len(args) > 2 and args[2] == "all" else "early"
+            )
         elif action.startswith("paper"):
             from .paper_bank import PaperBank
 

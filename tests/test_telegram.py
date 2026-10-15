@@ -143,6 +143,25 @@ async def test_paper_bank_setup_and_stake_edit_through_real_dispatcher(routed_bo
     )
 
 
+async def test_profit_research_panel_is_private_and_does_not_change_bank(routed_bot):
+    from betbot.paper_bank import PaperBank
+
+    bot, dispatcher, service, session = routed_bot
+    bank = PaperBank(service.store)
+    bank.start(1, 500000, 10000)
+    before = bank.summary(1)
+    await press(bot, dispatcher, "ui:profit-lab:early")
+    assert "Исследование доходности" in session.requests[-1].text
+    assert "Только подтверждённо ранние" in session.requests[-1].text
+    assert "условными расходами 2%" in session.requests[-1].text
+    await press(bot, dispatcher, "ui:profit-lab:all")
+    assert "Все наблюдения" in session.requests[-1].text
+    assert bank.summary(1) == before
+    before_requests = len(session.requests)
+    await press(bot, dispatcher, "ui:profit-lab:all", chat_id=-100, chat_type="group")
+    assert len(session.requests) == before_requests
+
+
 async def test_paper_bank_invalid_input_does_not_create_account_and_group_cannot_open_it(
     routed_bot,
 ):

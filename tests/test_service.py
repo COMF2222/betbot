@@ -59,6 +59,18 @@ async def test_collect_creates_once_and_default_is_preview(service, draft):
     assert service.store.forecast(id_)["state"] == "preview"
 
 
+async def test_profit_lab_failure_cannot_block_a_forecast(service, draft):
+    service.profit_lab = SimpleNamespace(
+        record=lambda identity: (_ for _ in ()).throw(ValueError("bad experiment"))
+    )
+    identity = await service.process_draft(draft)
+    assert identity and service.store.forecast(identity)["state"] == "preview"
+    assert any(
+        row["source"] == "Исследование доходности" and not row["ok"]
+        for row in service.store.health_rows()
+    )
+
+
 async def test_unknown_map_waits_then_creates_one_forecast_when_confirmed(service, draft):
     from betbot.paper_bank import PaperBank
 
